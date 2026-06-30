@@ -95,7 +95,10 @@ export const Results: React.FC<{ interviewId: string, onBack: () => void }> = ({
               <p className="text-[10px] font-bold text-[#007AFF] uppercase tracking-[0.2em]">Analytics Terminal</p>
               <h1 className="text-3xl font-bold tracking-tight text-white">{interview.title || interview.jobRole}</h1>
             </div>
-            <Button variant="ghost" onClick={onBack} className="rounded-xl px-4 h-10 font-medium border border-white/10 hover:bg-white/10 w-full md:w-auto text-white text-xs">Exit</Button>
+            <Button variant="ghost" onClick={onBack} className="rounded-xl px-4 h-10 font-medium border border-white/10 hover:bg-white/10 w-full md:w-auto text-white text-xs flex items-center justify-center gap-1.5 transition-all hover:translate-x-[-2px]">
+              <svg className="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
+              Back to Dashboard
+            </Button>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -189,8 +192,9 @@ export const Results: React.FC<{ interviewId: string, onBack: () => void }> = ({
         {/* Header Navigation & Actions */}
         <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
           <div className="flex items-center space-x-4">
-            <button onClick={() => setSelectedSession(null)} className="p-3 glass rounded-xl border border-white/10 hover:bg-white/10 transition-all group">
-              <svg className="w-5 h-5 text-white group-hover:-translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7"/></svg>
+            <button onClick={() => setSelectedSession(null)} className="px-4 py-2.5 glass rounded-xl border border-white/10 hover:bg-white/10 hover:border-white/20 transition-all group flex items-center gap-2 text-sm text-white font-medium">
+              <svg className="w-4 h-4 text-white group-hover:-translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7"/></svg>
+              Back to Candidates
             </button>
             <div>
               <div className="flex items-center gap-3">

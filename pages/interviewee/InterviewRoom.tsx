@@ -3,7 +3,7 @@ import { Button } from '../../components/Shared';
 import { db } from '../../services/db';
 import { Interview, Profile, InterviewSession } from '../../types';
 import Vapi from '@vapi-ai/web';
-import { FaceDetector, FilesetResolver } from '@mediapipe/tasks-vision';
+import { FaceDetector, ObjectDetector, FilesetResolver } from '@mediapipe/tasks-vision';
 
 export const InterviewRoom: React.FC<{ user: Profile, onComplete: () => void }> = ({ user, onComplete }) => {
   const [session, setSession] = useState<InterviewSession | null>(null);
@@ -18,10 +18,15 @@ export const InterviewRoom: React.FC<{ user: Profile, onComplete: () => void }> 
   const mountedRef = useRef(true);
   const videoRef = useRef<HTMLVideoElement>(null);
   const faceDetectorRef = useRef<FaceDetector | null>(null);
+  const objectDetectorRef = useRef<ObjectDetector | null>(null);
+  
   const lastVideoTimeRef = useRef(-1);
   const requestRef = useRef<number>(0);
   const noFaceTimerRef = useRef(0);
   const multiFaceTimerRef = useRef(0);
+  const gazeTimerRef = useRef(0);
+  const mobileTimerRef = useRef(0);
+  const suspiciousTimerRef = useRef(0);
   const isTerminatingRef = useRef(false);
 
   // Initialize Session
@@ -84,6 +89,36 @@ export const InterviewRoom: React.FC<{ user: Profile, onComplete: () => void }> 
             }
         });
 
+        // Vapi Message event handler for transcript monitoring (to detect automatic end of questions)
+        vapi.on('message', (message: any) => {
+            console.log('Vapi Message received:', message);
+            if (message?.type === 'transcript' && message?.role === 'assistant' && message?.transcriptType === 'final') {
+                const text = (message.transcript || "").toLowerCase();
+                
+                // Indicators that the agent has finished all questions and is wrapping up
+                const isClosingMessage = 
+                    text.includes("concludes our interview") || 
+                    text.includes("conclude our interview") || 
+                    text.includes("concludes the interview") || 
+                    text.includes("interview is complete") || 
+                    text.includes("responses have been recorded") ||
+                    text.includes("best of luck") ||
+                    text.includes("have a great day") ||
+                    text.includes("thank you for your time");
+
+                if (isClosingMessage) {
+                    console.log("Assistant spoke closing phrase. Setting auto-finish timer.");
+                    // Give 6 seconds to complete the spoken sentence naturally
+                    setTimeout(() => {
+                        if (mountedRef.current) {
+                            console.log("Auto-finishing interview room.");
+                            finishSession('completed');
+                        }
+                    }, 6000);
+                }
+            }
+        });
+
       } catch (err) {
           console.error("Init Error:", err);
           alert("Failed to initialize system.");
@@ -95,7 +130,11 @@ export const InterviewRoom: React.FC<{ user: Profile, onComplete: () => void }> 
 
     return () => { 
         mountedRef.current = false;
-        if (vapiRef.current) vapiRef.current.stop();
+        if (vapiRef.current) {
+            try {
+                vapiRef.current.stop();
+            } catch (e) {}
+        }
         if (requestRef.current) cancelAnimationFrame(requestRef.current);
     };
   }, [user.id]);
@@ -110,13 +149,15 @@ export const InterviewRoom: React.FC<{ user: Profile, onComplete: () => void }> 
       finishSession('completed');
   };
 
-  // --- FACE DETECTION SETUP ---
+  // --- DETECTORS SETUP ---
   useEffect(() => {
-      const loadFaceDetector = async () => {
+      const loadDetectors = async () => {
           try {
               const vision = await FilesetResolver.forVisionTasks(
                   "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.8/wasm"
               );
+              
+              // Load Face Detector
               faceDetectorRef.current = await FaceDetector.createFromOptions(vision, {
                   baseOptions: {
                       modelAssetPath: `https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite`,
@@ -125,18 +166,34 @@ export const InterviewRoom: React.FC<{ user: Profile, onComplete: () => void }> 
                   runningMode: "VIDEO"
               });
               console.log("Face Detector Loaded");
+
+              // Load Object Detector (COCO trained EfficientDet-Lite0 for cell phones, laptops, books, etc.)
+              try {
+                  objectDetectorRef.current = await ObjectDetector.createFromOptions(vision, {
+                      baseOptions: {
+                          modelAssetPath: "https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float16/1/efficientdet_lite0.tflite",
+                          delegate: "GPU"
+                      },
+                      runningMode: "VIDEO",
+                      scoreThreshold: 0.35
+                  });
+                  console.log("Object/Device Detector Loaded");
+              } catch (objErr) {
+                  console.warn("Could not load Object Detector, continuing with Face/Gaze only:", objErr);
+              }
+              
           } catch (e) {
-              console.error("Failed to load Face Detector", e);
+              console.error("Failed to load Vision Tasks", e);
           }
       };
-      loadFaceDetector();
+      loadDetectors();
   }, []);
 
-  // --- FACE DETECTION LOOP ---
-  const detectFaces = () => {
-      if (!videoRef.current || !faceDetectorRef.current || status !== 'live') return;
+  // --- CONSOLIDATED SECURITY DETECTIONS LOOP ---
+  const runSecurityDetections = () => {
+      if (!videoRef.current || status !== 'live') return;
       if (videoRef.current.readyState < 2) {
-          requestRef.current = requestAnimationFrame(detectFaces);
+          requestRef.current = requestAnimationFrame(runSecurityDetections);
           return;
       }
 
@@ -144,54 +201,146 @@ export const InterviewRoom: React.FC<{ user: Profile, onComplete: () => void }> 
       if (video.currentTime !== lastVideoTimeRef.current) {
           lastVideoTimeRef.current = video.currentTime;
           
-          try {
-              const detections = faceDetectorRef.current.detectForVideo(video, performance.now());
-              const count = detections.detections.length;
-              setFaceCount(count);
+          let activeWarning: string | null = null;
+          let terminateReason: string | null = null;
+          const timestamp = performance.now();
 
-              // SCENARIO 1: NO FACE (Tolerance: 10 seconds)
-              if (count === 0) {
-                  noFaceTimerRef.current += 100; // rough loop ms
-                  multiFaceTimerRef.current = 0;
-                  
-                  if (noFaceTimerRef.current > 2000) { // 2s warning
-                      setFaceWarning("⚠️ No face detected. Please return to frame.");
+          // 1. FACE DETECTION
+          if (faceDetectorRef.current) {
+              try {
+                  const faceResult = faceDetectorRef.current.detectForVideo(video, timestamp);
+                  const faces = faceResult.detections;
+                  const count = faces?.length || 0;
+                  setFaceCount(count);
+
+                  if (count === 0) {
+                      noFaceTimerRef.current += 100; // rough animation frame ms increment
+                      multiFaceTimerRef.current = 0;
+                      gazeTimerRef.current = 0; // reset gaze if no face is seen
+                      
+                      if (noFaceTimerRef.current > 2000) { // 2s warning
+                          activeWarning = "⚠️ No face detected. Please return to frame.";
+                      }
+                      if (noFaceTimerRef.current > 10000) { // 10s termination
+                          terminateReason = "No face detected for >10 seconds.";
+                      }
+                  } else if (count > 1) {
+                      multiFaceTimerRef.current += 100;
+                      noFaceTimerRef.current = 0;
+                      gazeTimerRef.current = 0;
+                      
+                      activeWarning = "⚠️ Security Alert: Multiple faces detected.";
+                      if (multiFaceTimerRef.current > 5000) { // 5s termination
+                          terminateReason = "Multiple faces detected in secure environment.";
+                      }
+                  } else {
+                      // Exactly 1 face - slowly decay face alerts
+                      noFaceTimerRef.current = Math.max(0, noFaceTimerRef.current - 50);
+                      multiFaceTimerRef.current = Math.max(0, multiFaceTimerRef.current - 50);
+
+                      // --- EYE GAZE / HEAD TURN TRACKING ---
+                      const face = faces[0];
+                      const keypoints = face.keypoints;
+                      if (keypoints && keypoints.length >= 3) {
+                          const rightEye = keypoints[0]; // Right eye (of face)
+                          const leftEye = keypoints[1];  // Left eye (of face)
+                          const nose = keypoints[2];     // Nose tip
+
+                          if (rightEye && leftEye && nose) {
+                              const eyeDist = Math.hypot(leftEye.x - rightEye.x, leftEye.y - rightEye.y);
+                              const eyeMidX = (leftEye.x + rightEye.x) / 2;
+                              const eyeMidY = (leftEye.y + rightEye.y) / 2;
+                              
+                              const horizontalDev = Math.abs(nose.x - eyeMidX) / eyeDist;
+                              const verticalDev = Math.abs(nose.y - eyeMidY) / eyeDist;
+
+                              // If the face is turned or looking significantly away from center
+                              if (horizontalDev > 0.32 || verticalDev > 0.45) {
+                                  gazeTimerRef.current += 100;
+                                  if (gazeTimerRef.current > 2500) { // 2.5s warning
+                                      activeWarning = "⚠️ Eye Gaze Alert: Please look directly at the screen and camera.";
+                                  }
+                                  if (gazeTimerRef.current > 8000) { // 8s termination
+                                      terminateReason = "Candidate looked away from the screen/camera for >8 seconds.";
+                                  }
+                              } else {
+                                  gazeTimerRef.current = Math.max(0, gazeTimerRef.current - 50);
+                              }
+                          }
+                      }
                   }
-                  if (noFaceTimerRef.current > 10000) { // 10s termination
-                      terminateSession("No face detected for >10 seconds.");
-                      return; 
-                  }
-              } 
-              // SCENARIO 2: MULTIPLE FACES (Tolerance: 5 seconds)
-              else if (count > 1) {
-                  multiFaceTimerRef.current += 100;
-                  noFaceTimerRef.current = 0;
-                  
-                  setFaceWarning("⚠️ Security Alert: Multiple faces detected.");
-                  
-                  if (multiFaceTimerRef.current > 5000) { // 5s termination
-                       terminateSession("Multiple faces detected in secure environment.");
-                       return;
-                  }
-              } 
-              // SCENARIO 3: ONE FACE (Clean)
-              else {
-                  // Reset timers slowly to avoid flickering
-                  noFaceTimerRef.current = Math.max(0, noFaceTimerRef.current - 50);
-                  multiFaceTimerRef.current = Math.max(0, multiFaceTimerRef.current - 50);
-                  setFaceWarning(null);
+              } catch (e) {
+                  // Ignore transient detection errors
               }
-          } catch (e) {
-              // Ignore transient detection errors
+          }
+
+          // 2. OBJECT / DEVICE DETECTION
+          if (objectDetectorRef.current && !terminateReason) {
+              try {
+                  const objResult = objectDetectorRef.current.detectForVideo(video, timestamp);
+                  const detections = objResult.detections || [];
+
+                  let mobileDetectedThisFrame = false;
+                  let suspiciousDetectedThisFrame = false;
+
+                  for (const det of detections) {
+                      const category = det.categories?.[0];
+                      if (category) {
+                          const name = category.categoryName?.toLowerCase() || "";
+                          const score = category.score || 0;
+
+                          if (name === 'cell phone' && score > 0.35) {
+                              mobileDetectedThisFrame = true;
+                          } else if ((name === 'book' || name === 'laptop' || name === 'tablet' || name === 'electronic device') && score > 0.4) {
+                              suspiciousDetectedThisFrame = true;
+                          }
+                      }
+                  }
+
+                  if (mobileDetectedThisFrame) {
+                      mobileTimerRef.current += 100;
+                      if (mobileTimerRef.current > 1500) { // 1.5s warning
+                          activeWarning = "⚠️ Security Alert: Mobile phone detected! Usage is strictly prohibited.";
+                      }
+                      if (mobileTimerRef.current > 4000) { // 4s termination
+                          terminateReason = "Mobile device detected in secure environment.";
+                      }
+                  } else {
+                      mobileTimerRef.current = Math.max(0, mobileTimerRef.current - 50);
+                  }
+
+                  if (suspiciousDetectedThisFrame && !mobileDetectedThisFrame) {
+                      suspiciousTimerRef.current += 100;
+                      if (suspiciousTimerRef.current > 2000) { // 2s warning
+                          activeWarning = "⚠️ Security Alert: Suspicious object or secondary device detected.";
+                      }
+                      if (suspiciousTimerRef.current > 6000) { // 6s termination
+                          terminateReason = "Suspicious object or device detected in secure environment.";
+                      }
+                  } else {
+                      suspiciousTimerRef.current = Math.max(0, suspiciousTimerRef.current - 50);
+                  }
+
+              } catch (e) {
+                  // Ignore transient detection errors
+              }
+          }
+
+          // Apply warnings & termination
+          setFaceWarning(activeWarning);
+
+          if (terminateReason) {
+              terminateSession(terminateReason);
+              return;
           }
       }
-      requestRef.current = requestAnimationFrame(detectFaces);
+      requestRef.current = requestAnimationFrame(runSecurityDetections);
   };
 
   // Start loop when live
   useEffect(() => {
       if (status === 'live') {
-          requestRef.current = requestAnimationFrame(detectFaces);
+          requestRef.current = requestAnimationFrame(runSecurityDetections);
       } else {
           if (requestRef.current) cancelAnimationFrame(requestRef.current);
       }
@@ -261,13 +410,17 @@ export const InterviewRoom: React.FC<{ user: Profile, onComplete: () => void }> 
     } catch(e) {}
 
     if (session) {
-        await db.sessions.update({ 
-            ...session, 
-            status: 'terminated_early', 
-            completedAt: Date.now(),
-            terminationReason: reason,
-            decision: 'failed'
-        });
+        try {
+            await db.sessions.update({ 
+                ...session, 
+                status: 'terminated_early', 
+                completedAt: Date.now(),
+                terminationReason: reason,
+                decision: 'failed'
+            });
+        } catch (dbErr) {
+            console.error("Database error updating terminated session:", dbErr);
+        }
     }
 
     if (document.fullscreenElement) {
@@ -291,11 +444,15 @@ export const InterviewRoom: React.FC<{ user: Profile, onComplete: () => void }> 
         if (vapiRef.current) vapiRef.current.stop();
     } catch(e) {}
 
-    await db.sessions.update({ 
-        ...session, 
-        status: finalStatus, 
-        completedAt: Date.now() 
-    });
+    try {
+        await db.sessions.update({ 
+            ...session, 
+            status: finalStatus, 
+            completedAt: Date.now() 
+        });
+    } catch (dbErr) {
+        console.error("Database error updating completed session:", dbErr);
+    }
 
     if (document.fullscreenElement) {
         document.exitFullscreen().catch(() => {});

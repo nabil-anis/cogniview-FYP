@@ -88,8 +88,9 @@ export const CreateInterview: React.FC<{ user: Profile, onBack: () => void }> = 
         {/* Header */}
         <div className="flex items-center justify-between mb-6 sticky top-4 z-40 bg-black/80 backdrop-blur-xl p-3 -mx-3 rounded-[16px] border border-white/5">
            <div className="flex items-center gap-3">
-              <button onClick={onBack} className="w-8 h-8 rounded-full bg-[#1C1C1E] flex items-center justify-center text-white hover:bg-[#2C2C2E] transition-colors border border-white/5">
-                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
+              <button onClick={onBack} className="px-3 py-1.5 rounded-full bg-[#1C1C1E] flex items-center justify-center text-xs font-medium text-white/80 hover:text-white hover:bg-[#2C2C2E] transition-all border border-white/5 gap-1.5 group">
+                 <svg className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
+                 Back
               </button>
               <h1 className="text-base font-semibold text-white">New Assessment</h1>
            </div>
