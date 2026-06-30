@@ -32,6 +32,53 @@ const App: React.FC = () => {
       }
     };
     init();
+
+    // Intercept and demote Vapi/LiveKit ejection and meeting end errors
+    const originalConsoleError = console.error;
+    console.error = (...args: any[]) => {
+      const msg = args.map(arg => {
+        if (!arg) return "";
+        if (typeof arg === 'object') {
+          try {
+            return JSON.stringify(arg);
+          } catch(e) {
+            return String(arg);
+          }
+        }
+        return String(arg);
+      }).join(' ');
+
+      if (msg.includes("ejection") || msg.includes("Meeting has ended") || msg.includes("Room closed") || msg.includes("Meeting ended due to ejection")) {
+        console.warn("[Demoted Error to Warn] Vapi connection finished:", ...args);
+        return;
+      }
+      originalConsoleError.apply(console, args);
+    };
+
+    const handleWindowError = (event: ErrorEvent) => {
+      const msg = event?.message || "";
+      if (msg.includes("ejection") || msg.includes("Meeting has ended") || msg.includes("Room closed") || msg.includes("Meeting ended due to ejection")) {
+        event.preventDefault();
+        console.log("[Silenced Unhandled Error]:", msg);
+      }
+    };
+
+    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+      const msg = event?.reason?.message || String(event?.reason || "");
+      if (msg.includes("ejection") || msg.includes("Meeting has ended") || msg.includes("Room closed") || msg.includes("Meeting ended due to ejection")) {
+        event.preventDefault();
+        console.log("[Silenced Unhandled Rejection]:", msg);
+      }
+    };
+
+    window.addEventListener('error', handleWindowError);
+    window.addEventListener('unhandledrejection', handleUnhandledRejection);
+
+    return () => {
+      console.error = originalConsoleError;
+      window.removeEventListener('error', handleWindowError);
+      window.removeEventListener('unhandledrejection', handleUnhandledRejection);
+    };
   }, []);
 
   const navigateUser = async (user: Profile) => {
@@ -63,20 +110,28 @@ const App: React.FC = () => {
   const activeRole = currentUser ? currentUser.role : (currentPage === 'login-candidate' ? 'interviewee' : (currentPage === 'login-recruiter' ? 'recruiter' : 'guest'));
 
   // Define dynamic brand accent
-  let brandPrimary = '#3B82F6'; // Royal blue
-  let brandPrimaryRgb = '59, 130, 246';
+  let brandPrimary = '#8B5CF6'; // Premium Amethyst Violet for Recruiter
+  let brandPrimaryRgb = '139, 92, 246';
   
   if (activeRole === 'interviewee') {
-    brandPrimary = '#10B981'; // Mint Green
-    brandPrimaryRgb = '16, 185, 129';
+    brandPrimary = '#0D9488'; // Vibrant Teal for Candidate
+    brandPrimaryRgb = '13, 148, 136';
   } else if (activeRole === 'recruiter') {
-    brandPrimary = '#2563EB'; // Vibrant recruiter blue
-    brandPrimaryRgb = '37, 99, 235';
+    brandPrimary = '#8B5CF6'; // Premium Amethyst Violet
+    brandPrimaryRgb = '139, 92, 246';
   } else {
     // Visitor default
-    brandPrimary = '#007AFF';
-    brandPrimaryRgb = '0, 122, 255';
+    brandPrimary = '#E2E8F0'; // Sleek Platinum/Silver
+    brandPrimaryRgb = '226, 232, 240';
   }
+
+  // Dynamic Ambient Color that changes depending on dark/light mode toggle
+  const ambientColor = themeMode === 'light'
+    ? (activeRole === 'interviewee' ? '#0F766E' : '#6D28D9') // Deep teal or deep violet
+    : (activeRole === 'interviewee' ? '#14B8A6' : '#8B5CF6'); // Vivid teal or vivid violet
+  const ambientColorRgb = themeMode === 'light'
+    ? (activeRole === 'interviewee' ? '15, 118, 110' : '109, 40, 217')
+    : (activeRole === 'interviewee' ? '20, 184, 166' : '139, 92, 246');
 
   // Background modes:
   // - Light mode: Pristine pure white (#FFFFFF)
@@ -173,14 +228,21 @@ const App: React.FC = () => {
         .border-r-\\[\\#007AFF\\] {
           border-right-color: var(--brand-primary) !important;
         }
+        
+        /* Eliminate cheap gradients - replace with elegant solid color */
         .text-transparent.bg-clip-text.bg-gradient-to-r.from-\\[\\#007AFF\\] {
-          background-image: linear-gradient(to right, var(--brand-primary), #38BDF8, var(--brand-primary)) !important;
+          background-image: none !important;
+          background-clip: unset !important;
+          -webkit-background-clip: unset !important;
+          -webkit-text-fill-color: var(--brand-primary) !important;
+          color: var(--brand-primary) !important;
         }
         .bg-gradient-to-b.from-\\[\\#007AFF\\]\\/10 {
-          background-image: linear-gradient(to bottom, rgba(var(--brand-primary-rgb), 0.1), transparent) !important;
+          background-image: linear-gradient(to bottom, rgba(var(--brand-primary-rgb), 0.04), transparent) !important;
         }
         .bg-gradient-to-b.from-\\[\\#007AFF\\] {
-          background-image: linear-gradient(to bottom, var(--brand-primary), var(--brand-primary)) !important;
+          background-image: none !important;
+          background-color: var(--brand-primary) !important;
         }
         .hover\\:text-\\[\\#007AFF\\]:hover {
           color: var(--brand-primary) !important;
@@ -207,30 +269,70 @@ const App: React.FC = () => {
 
         /* --- Light Theme Overrides (Applied when themeMode === 'light') --- */
         .theme-light {
-          color: #334155 !important;
+          color: #1E293B !important;
         }
-        .theme-light .text-white, 
+        
+        /* High Contrast Dark Headings for Light Theme */
         .theme-light h1, 
         .theme-light h2, 
         .theme-light h3, 
         .theme-light h4, 
         .theme-light h5, 
-        .theme-light h6, 
-        .theme-light .font-bold,
-        .theme-light .font-semibold,
-        .theme-light .text-slate-100,
-        .theme-light .text-zinc-100 {
+        .theme-light h6 {
           color: #0F172A !important;
         }
-        .theme-light .text-white\\/40, .theme-light .text-zinc-400, .theme-light .text-slate-400 {
-          color: #64748B !important;
+
+        /* Strong Text Contrast Rules for Light mode elements */
+        .theme-light .text-white,
+        .theme-light .text-white\\/90,
+        .theme-light .text-white\\/80,
+        .theme-light .text-slate-100,
+        .theme-light .text-slate-200,
+        .theme-light .text-zinc-100,
+        .theme-light .text-zinc-200,
+        .theme-light .text-gray-100,
+        .theme-light .text-gray-200 {
+          color: #0F172A !important;
         }
-        .theme-light .text-white\\/60, .theme-light .text-white\\/50, .theme-light .text-white\\/70, .theme-light .text-slate-300, .theme-light .text-zinc-300 {
+
+        .theme-light .text-white\\/70,
+        .theme-light .text-white\\/60,
+        .theme-light .text-slate-300,
+        .theme-light .text-zinc-300,
+        .theme-light .text-gray-300 {
+          color: #334155 !important;
+        }
+
+        .theme-light .text-white\\/50,
+        .theme-light .text-white\\/40,
+        .theme-light .text-slate-400,
+        .theme-light .text-zinc-400,
+        .theme-light .text-gray-400 {
           color: #475569 !important;
         }
-        .theme-light .text-white\\/80, .theme-light .text-white\\/90 {
-          color: #1E293B !important;
+
+        .theme-light .text-white\\/30,
+        .theme-light .text-slate-500,
+        .theme-light .text-zinc-500,
+        .theme-light .text-gray-500 {
+          color: #64748B !important;
         }
+
+        /* Keep text color pristine on solid colored buttons or status bubbles */
+        .theme-light button .text-white,
+        .theme-light button[class*="bg-"] *,
+        .theme-light .btn *,
+        .theme-light [class*="bg-indigo-600"] *,
+        .theme-light [class*="bg-emerald-600"] *,
+        .theme-light [class*="bg-green-600"] *,
+        .theme-light [class*="bg-red-600"] *,
+        .theme-light [class*="bg-emerald-500"] *,
+        .theme-light [class*="bg-green-500"] *,
+        .theme-light [class*="bg-[#10B981]"] *,
+        .theme-light [class*="bg-[#6366F1]"] * {
+          color: #FFFFFF !important;
+        }
+
         .theme-light .bg-white\\/5 {
           background-color: rgba(0, 0, 0, 0.04) !important;
         }
@@ -246,7 +348,7 @@ const App: React.FC = () => {
         .theme-light input, .theme-light textarea, .theme-light select {
           background-color: #FFFFFF !important;
           color: #0F172A !important;
-          border-color: rgba(0, 0, 0, 0.12) !important;
+          border: 1px solid rgba(0, 0, 0, 0.12) !important;
         }
         .theme-light input::placeholder, .theme-light textarea::placeholder {
           color: #94A3B8 !important;
@@ -272,53 +374,53 @@ const App: React.FC = () => {
       {/* Top Navigation Bar - HyperOS Style: Simple, blurred, distinct */}
       {currentUser && currentPage !== 'interview-room' && (
         <header className="sticky top-0 z-50 w-full bg-black/70 backdrop-blur-2xl border-b border-white/[0.06]">
-          <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
+          <div className="max-w-7xl mx-auto px-4 md:px-6 h-16 md:h-20 flex items-center justify-between">
             {/* Logo Area */}
             <div 
-              className="flex items-center gap-4 cursor-pointer hover:opacity-80 transition-opacity" 
+              className="flex items-center gap-2 md:gap-4 cursor-pointer hover:opacity-80 transition-opacity" 
               onClick={() => navigateUser(currentUser)}
             >
               <div 
-                className="w-10 h-10 bg-white rounded-[14px] flex items-center justify-center shadow-lg transition-colors"
+                className="w-8 h-8 md:w-10 md:h-10 bg-white rounded-[10px] md:rounded-[14px] flex items-center justify-center shadow-lg transition-colors"
                 style={{ shadowColor: brandPrimary }}
               >
-                <div className="w-5 h-5 bg-black rounded-md"></div>
+                <div className="w-4 h-4 md:w-5 md:h-5 bg-black rounded-md"></div>
               </div>
               <div className="flex flex-col">
-                <span className="text-base font-bold text-white leading-none">Cogniview</span>
+                <span className="text-sm md:text-base font-bold text-white leading-none">Cogniview</span>
                 <span 
-                  className="text-[10px] font-bold uppercase tracking-widest mt-1.5 px-2 py-0.5 rounded-full bg-white/5 border border-white/5"
+                  className="text-[8px] md:text-[10px] font-bold uppercase tracking-widest mt-1 md:mt-1.5 px-1.5 md:px-2 py-0.5 rounded-full bg-white/5 border border-white/5"
                   style={{ color: brandPrimary }}
                 >
-                  {currentUser.role === 'recruiter' ? 'Recruiter Profile' : 'Candidate Portal'}
+                  {currentUser.role === 'recruiter' ? 'Recruiter' : 'Candidate'}
                 </span>
               </div>
             </div>
             
             {/* Theme Mode & User Controls */}
-            <div className="flex items-center gap-6">
+            <div className="flex items-center gap-2 md:gap-4">
               {/* Theme Mode Segmented Controller */}
               <div className="flex bg-white/5 p-1 rounded-full border border-white/5 items-center">
                 <button 
                   onClick={() => setThemeMode('dark')}
-                  className={`px-3 py-1.5 rounded-full text-[10px] font-bold transition-all flex items-center gap-1 uppercase tracking-wider ${themeMode === 'dark' ? 'bg-white text-black shadow-md' : 'text-white/40 hover:text-white/70'}`}
+                  className={`px-2 md:px-3 py-1 md:py-1.5 rounded-full text-[9px] md:text-[10px] font-bold transition-all flex items-center gap-1 uppercase tracking-wider ${themeMode === 'dark' ? 'bg-white text-black shadow-md' : 'text-white/40 hover:text-white/70'}`}
                   title="Space Dark Mode"
                 >
                   <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/></svg>
-                  Dark
+                  <span className="hidden sm:inline">Dark</span>
                 </button>
                 <button 
                   onClick={() => setThemeMode('light')}
-                  className={`px-3 py-1.5 rounded-full text-[10px] font-bold transition-all flex items-center gap-1 uppercase tracking-wider ${themeMode === 'light' ? 'bg-[#0F172A] text-white shadow-md' : 'text-white/40 hover:text-white/70'}`}
+                  className={`px-2 md:px-3 py-1 md:py-1.5 rounded-full text-[9px] md:text-[10px] font-bold transition-all flex items-center gap-1 uppercase tracking-wider ${themeMode === 'light' ? 'bg-[#0F172A] text-white shadow-md' : 'text-white/40 hover:text-white/70'}`}
                   title="Pristine Light Mode"
                 >
                   <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364l-.707.707M6.343 17.657l-.707.707m0-11.314l.707.707m11.314 11.314l.707-.707M12 5a7 7 0 100 14 7 7 0 000-14z"/></svg>
-                  Light
+                  <span className="hidden sm:inline">Light</span>
                 </button>
               </div>
 
-              <div className="flex items-center gap-4 bg-white/5 pl-4 pr-2 py-1.5 rounded-full border border-white/5">
-                <span className="text-sm font-medium text-white/90">{currentUser.name}</span>
+              <div className="flex items-center gap-2 bg-white/5 p-1 md:pl-4 md:pr-2 md:py-1.5 rounded-full border border-white/5">
+                <span className="text-xs md:text-sm font-medium text-white/90 hidden md:inline">{currentUser.name}</span>
                 <div 
                   className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white shadow-inner border border-white/10"
                   style={{ backgroundColor: brandPrimary }}
@@ -329,10 +431,10 @@ const App: React.FC = () => {
               
               <button 
                 onClick={logout} 
-                className="w-10 h-10 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center transition-colors border border-white/5 text-white/60 hover:text-white"
+                className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center transition-colors border border-white/5 text-white/60 hover:text-white"
                 title="Sign Out"
               >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
+                <svg className="w-4 h-4 md:w-5 md:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
               </button>
             </div>
           </div>
@@ -346,10 +448,10 @@ const App: React.FC = () => {
           <div 
             className="absolute inset-0 w-full h-full transition-all duration-700 opacity-80"
             style={{
-              background: `linear-gradient(90deg, transparent 0%, var(--brand-primary) 50%, transparent 100%)`,
+              background: `linear-gradient(90deg, transparent 0%, ${ambientColor} 50%, transparent 100%)`,
               boxShadow: themeMode === 'light' 
-                ? `0 1px 6px rgba(var(--brand-primary-rgb), 0.3)` 
-                : `0 0 15px rgba(var(--brand-primary-rgb), 0.7)`,
+                ? `0 1px 6px rgba(${ambientColorRgb}, 0.5)` 
+                : `0 0 15px rgba(${ambientColorRgb}, 0.9)`,
             }}
           />
           {/* Ambient running shine spark */}

@@ -13,14 +13,17 @@ export const InterviewRoom: React.FC<{ user: Profile, onComplete: () => void }> 
   const [volumeLevel, setVolumeLevel] = useState(0);
   const [faceWarning, setFaceWarning] = useState<string | null>(null);
   const [faceCount, setFaceCount] = useState<number>(0);
+  const [cameraAtAngle, setCameraAtAngle] = useState<boolean>(false);
   
   const vapiRef = useRef<any>(null);
   const mountedRef = useRef(true);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const faceDetectorRef = useRef<FaceDetector | null>(null);
   const objectDetectorRef = useRef<ObjectDetector | null>(null);
   
   const lastVideoTimeRef = useRef(-1);
+  const lastDetectionTimeRef = useRef<number>(0);
   const requestRef = useRef<number>(0);
   const noFaceTimerRef = useRef(0);
   const multiFaceTimerRef = useRef(0);
@@ -85,7 +88,7 @@ export const InterviewRoom: React.FC<{ user: Profile, onComplete: () => void }> 
             if (msg.includes("ejection") || msg.includes("Meeting has ended") || msg.includes("Room closed")) {
                 handleCallEndGracefully();
             } else {
-                console.error("Non-fatal Vapi Error:", msg);
+                console.warn("Non-fatal Vapi Error:", msg);
             }
         });
 
@@ -136,6 +139,11 @@ export const InterviewRoom: React.FC<{ user: Profile, onComplete: () => void }> 
             } catch (e) {}
         }
         if (requestRef.current) cancelAnimationFrame(requestRef.current);
+        if (streamRef.current) {
+            try {
+                streamRef.current.getTracks().forEach(track => track.stop());
+            } catch (e) {}
+        }
     };
   }, [user.id]);
 
@@ -198,8 +206,12 @@ export const InterviewRoom: React.FC<{ user: Profile, onComplete: () => void }> 
       }
 
       const video = videoRef.current;
-      if (video.currentTime !== lastVideoTimeRef.current) {
-          lastVideoTimeRef.current = video.currentTime;
+      const now = performance.now();
+      
+      // Throttle heavy ML inference to once every 250ms to ensure butter-smooth 60 FPS UI refresh rate
+      if (now - lastDetectionTimeRef.current >= 250) {
+          const elapsed = lastDetectionTimeRef.current === 0 ? 250 : Math.min(now - lastDetectionTimeRef.current, 1000);
+          lastDetectionTimeRef.current = now;
           
           let activeWarning: string | null = null;
           let terminateReason: string | null = null;
@@ -214,59 +226,61 @@ export const InterviewRoom: React.FC<{ user: Profile, onComplete: () => void }> 
                   setFaceCount(count);
 
                   if (count === 0) {
-                      noFaceTimerRef.current += 100; // rough animation frame ms increment
+                      noFaceTimerRef.current += elapsed;
                       multiFaceTimerRef.current = 0;
                       gazeTimerRef.current = 0; // reset gaze if no face is seen
                       
-                      if (noFaceTimerRef.current > 2000) { // 2s warning
+                      if (noFaceTimerRef.current > 12000) { // 12s warning
                           activeWarning = "⚠️ No face detected. Please return to frame.";
                       }
-                      if (noFaceTimerRef.current > 10000) { // 10s termination
-                          terminateReason = "No face detected for >10 seconds.";
+                      if (noFaceTimerRef.current > 60000) { // 60s termination
+                          terminateReason = "No face detected for >60 seconds.";
                       }
                   } else if (count > 1) {
-                      multiFaceTimerRef.current += 100;
+                      multiFaceTimerRef.current += elapsed;
                       noFaceTimerRef.current = 0;
                       gazeTimerRef.current = 0;
                       
                       activeWarning = "⚠️ Security Alert: Multiple faces detected.";
-                      if (multiFaceTimerRef.current > 5000) { // 5s termination
+                      if (multiFaceTimerRef.current > 20000) { // 20s termination
                           terminateReason = "Multiple faces detected in secure environment.";
                       }
                   } else {
-                      // Exactly 1 face - slowly decay face alerts
-                      noFaceTimerRef.current = Math.max(0, noFaceTimerRef.current - 50);
-                      multiFaceTimerRef.current = Math.max(0, multiFaceTimerRef.current - 50);
+                      // Exactly 1 face - decay face alerts
+                      noFaceTimerRef.current = Math.max(0, noFaceTimerRef.current - (elapsed / 2));
+                      multiFaceTimerRef.current = Math.max(0, multiFaceTimerRef.current - (elapsed / 2));
 
                       // --- EYE GAZE / HEAD TURN TRACKING ---
-                      const face = faces[0];
-                      const keypoints = face.keypoints;
-                      if (keypoints && keypoints.length >= 3) {
-                          const rightEye = keypoints[0]; // Right eye (of face)
-                          const leftEye = keypoints[1];  // Left eye (of face)
-                          const nose = keypoints[2];     // Nose tip
+                      if (!cameraAtAngle) {
+                          const face = faces[0];
+                          const keypoints = face.keypoints;
+                          if (keypoints && keypoints.length >= 3) {
+                              const rightEye = keypoints[0]; // Right eye (of face)
+                              const leftEye = keypoints[1];  // Left eye (of face)
+                              const nose = keypoints[2];     // Nose tip
 
-                          if (rightEye && leftEye && nose) {
-                              const eyeDist = Math.hypot(leftEye.x - rightEye.x, leftEye.y - rightEye.y);
-                              const eyeMidX = (leftEye.x + rightEye.x) / 2;
-                              const eyeMidY = (leftEye.y + rightEye.y) / 2;
-                              
-                              const horizontalDev = Math.abs(nose.x - eyeMidX) / eyeDist;
-                              const verticalDev = Math.abs(nose.y - eyeMidY) / eyeDist;
+                              if (rightEye && leftEye && nose) {
+                                  const eyeDist = Math.hypot(leftEye.x - rightEye.x, leftEye.y - rightEye.y);
+                                  const eyeMidX = (leftEye.x + rightEye.x) / 2;
+                                  const eyeMidY = (leftEye.y + rightEye.y) / 2;
+                                  
+                                  const horizontalDev = Math.abs(nose.x - eyeMidX) / eyeDist;
+                                  const verticalDev = Math.abs(nose.y - eyeMidY) / eyeDist;
 
-                              // If the face is turned or looking significantly away from center
-                              if (horizontalDev > 0.32 || verticalDev > 0.45) {
-                                  gazeTimerRef.current += 100;
-                                  if (gazeTimerRef.current > 2500) { // 2.5s warning
-                                      activeWarning = "⚠️ Eye Gaze Alert: Please look directly at the screen and camera.";
+                                  // Extremely lenient thresholds to allow standard camera layouts and angles
+                                  if (horizontalDev > 0.85 || verticalDev > 0.95) {
+                                      gazeTimerRef.current += elapsed;
+                                      if (gazeTimerRef.current > 10000) { // 10s warning
+                                          activeWarning = "⚠️ Just a reminder: please look directly at the screen and camera.";
+                                      }
+                                      // NEVER terminate candidate for gaze tracking anymore
+                                  } else {
+                                      gazeTimerRef.current = Math.max(0, gazeTimerRef.current - (elapsed / 2));
                                   }
-                                  if (gazeTimerRef.current > 8000) { // 8s termination
-                                      terminateReason = "Candidate looked away from the screen/camera for >8 seconds.";
-                                  }
-                              } else {
-                                  gazeTimerRef.current = Math.max(0, gazeTimerRef.current - 50);
                               }
                           }
+                      } else {
+                          gazeTimerRef.current = 0;
                       }
                   }
               } catch (e) {
@@ -289,36 +303,36 @@ export const InterviewRoom: React.FC<{ user: Profile, onComplete: () => void }> 
                           const name = category.categoryName?.toLowerCase() || "";
                           const score = category.score || 0;
 
-                          if (name === 'cell phone' && score > 0.35) {
+                          if (name === 'cell phone' && score > 0.38) {
                               mobileDetectedThisFrame = true;
-                          } else if ((name === 'book' || name === 'laptop' || name === 'tablet' || name === 'electronic device') && score > 0.4) {
+                          } else if ((name === 'book' || name === 'laptop' || name === 'tablet' || name === 'electronic device') && score > 0.45) {
                               suspiciousDetectedThisFrame = true;
                           }
                       }
                   }
 
                   if (mobileDetectedThisFrame) {
-                      mobileTimerRef.current += 100;
-                      if (mobileTimerRef.current > 1500) { // 1.5s warning
+                      mobileTimerRef.current += elapsed;
+                      if (mobileTimerRef.current > 5000) { // 5s warning
                           activeWarning = "⚠️ Security Alert: Mobile phone detected! Usage is strictly prohibited.";
                       }
-                      if (mobileTimerRef.current > 4000) { // 4s termination
+                      if (mobileTimerRef.current > 30000) { // 30s termination
                           terminateReason = "Mobile device detected in secure environment.";
                       }
                   } else {
-                      mobileTimerRef.current = Math.max(0, mobileTimerRef.current - 50);
+                      mobileTimerRef.current = Math.max(0, mobileTimerRef.current - (elapsed / 2));
                   }
 
                   if (suspiciousDetectedThisFrame && !mobileDetectedThisFrame) {
-                      suspiciousTimerRef.current += 100;
-                      if (suspiciousTimerRef.current > 2000) { // 2s warning
+                      suspiciousTimerRef.current += elapsed;
+                      if (suspiciousTimerRef.current > 8000) { // 8s warning
                           activeWarning = "⚠️ Security Alert: Suspicious object or secondary device detected.";
                       }
-                      if (suspiciousTimerRef.current > 6000) { // 6s termination
+                      if (suspiciousTimerRef.current > 40000) { // 40s termination
                           terminateReason = "Suspicious object or device detected in secure environment.";
                       }
                   } else {
-                      suspiciousTimerRef.current = Math.max(0, suspiciousTimerRef.current - 50);
+                      suspiciousTimerRef.current = Math.max(0, suspiciousTimerRef.current - (elapsed / 2));
                   }
 
               } catch (e) {
@@ -340,6 +354,7 @@ export const InterviewRoom: React.FC<{ user: Profile, onComplete: () => void }> 
   // Start loop when live
   useEffect(() => {
       if (status === 'live') {
+          lastDetectionTimeRef.current = performance.now();
           requestRef.current = requestAnimationFrame(runSecurityDetections);
       } else {
           if (requestRef.current) cancelAnimationFrame(requestRef.current);
@@ -405,26 +420,37 @@ export const InterviewRoom: React.FC<{ user: Profile, onComplete: () => void }> 
     
     setStatus('terminated');
     
+    // Immediately stop camera tracks so the webcam light turns off
+    if (streamRef.current) {
+        try {
+            streamRef.current.getTracks().forEach(track => track.stop());
+            streamRef.current = null;
+        } catch (e) {}
+    }
+    if (videoRef.current) {
+        videoRef.current.srcObject = null;
+    }
+
     try {
         if (vapiRef.current) vapiRef.current.stop();
     } catch(e) {}
 
     if (session) {
-        try {
-            await db.sessions.update({ 
-                ...session, 
-                status: 'terminated_early', 
-                completedAt: Date.now(),
-                terminationReason: reason,
-                decision: 'failed'
-            });
-        } catch (dbErr) {
+        db.sessions.update({ 
+            ...session, 
+            status: 'terminated_early', 
+            completedAt: Date.now(),
+            terminationReason: reason,
+            decision: 'failed'
+        }).catch(dbErr => {
             console.error("Database error updating terminated session:", dbErr);
-        }
+        });
     }
 
     if (document.fullscreenElement) {
-        document.exitFullscreen().catch(() => {});
+        try {
+            document.exitFullscreen().catch(() => {});
+        } catch (e) {}
     }
 
     alert(`⚠️ INTERVIEW TERMINATED\nReason: ${reason}`);
@@ -440,22 +466,33 @@ export const InterviewRoom: React.FC<{ user: Profile, onComplete: () => void }> 
     // UI Feedback immediately
     setStatus('completed');
 
+    // Immediately stop camera tracks so the webcam light turns off
+    if (streamRef.current) {
+        try {
+            streamRef.current.getTracks().forEach(track => track.stop());
+            streamRef.current = null;
+        } catch (e) {}
+    }
+    if (videoRef.current) {
+        videoRef.current.srcObject = null;
+    }
+
     try {
         if (vapiRef.current) vapiRef.current.stop();
     } catch(e) {}
 
-    try {
-        await db.sessions.update({ 
-            ...session, 
-            status: finalStatus, 
-            completedAt: Date.now() 
-        });
-    } catch (dbErr) {
+    db.sessions.update({ 
+        ...session, 
+        status: finalStatus, 
+        completedAt: Date.now() 
+    }).catch(dbErr => {
         console.error("Database error updating completed session:", dbErr);
-    }
+    });
 
     if (document.fullscreenElement) {
-        document.exitFullscreen().catch(() => {});
+        try {
+            document.exitFullscreen().catch(() => {});
+        } catch (e) {}
     }
     onComplete();
   };
@@ -476,6 +513,7 @@ export const InterviewRoom: React.FC<{ user: Profile, onComplete: () => void }> 
             }, 
             audio: false 
         });
+        streamRef.current = stream;
         if (videoRef.current) {
             videoRef.current.srcObject = stream;
         }
@@ -716,37 +754,61 @@ All candidate responses are automatically recorded. Ensure you clearly distingui
   
   if (status === 'loading' || !interview || !session) {
     return (
-        <div className="flex flex-col items-center justify-center h-screen w-screen bg-black text-white font-sans">
-            <div className="w-10 h-10 border-4 border-white/10 border-t-[#007AFF] rounded-full animate-spin mb-4"></div>
-            <p className="text-xs font-bold text-white/50 tracking-widest uppercase">Initializing Secure Environment...</p>
+        <div className="flex flex-col items-center justify-center h-screen w-screen bg-[#070A13] text-white font-sans relative">
+            <div className="absolute inset-0 bg-gradient-to-tr from-[#0D9488]/5 via-transparent to-transparent pointer-events-none"></div>
+            <div className="w-12 h-12 border-4 border-[#0D9488]/20 border-t-[#0D9488] rounded-full animate-spin mb-6 shadow-[0_0_20px_rgba(13,148,136,0.3)]"></div>
+            <p className="text-[10px] font-bold text-[#0D9488] tracking-[0.25em] uppercase">Initializing Secure Environment...</p>
         </div>
     );
   }
 
   return (
-    <div className="h-screen w-screen bg-black text-white relative overflow-hidden font-mono selection:bg-transparent">
+    <div className="h-screen w-screen bg-[#070A13] text-white relative overflow-hidden font-sans selection:bg-transparent">
+      {/* Background Ambient Radial Glow */}
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-[#0D9488]/5 rounded-full blur-[120px] pointer-events-none z-0"></div>
       
       {/* --- INSTRUCTIONS --- */}
       {status === 'instructions' && (
         <div className="flex flex-col items-center justify-center h-full p-6 relative z-20 font-sans">
-            <div className="absolute top-0 w-full h-1/2 bg-gradient-to-b from-[#007AFF]/10 to-transparent pointer-events-none"></div>
-            <div className="max-w-lg w-full text-center space-y-6 glass p-8 rounded-[24px] border border-white/10 animate-in zoom-in-95 duration-500 mx-4 shadow-2xl">
-              <h1 className="text-xl font-bold text-white">Security Check</h1>
-              <div className="grid gap-2 text-left">
-                  <div className="bg-white/5 p-3 rounded-[16px] border border-white/5 flex gap-3 items-center">
-                      <div className="w-4 h-4 rounded-full bg-green-500/20 text-green-500 flex items-center justify-center text-[10px] font-bold">✓</div>
-                      <p className="text-xs font-bold text-white">Face Detection Enabled</p>
-                  </div>
-                  <div className="bg-red-500/10 p-3 rounded-[16px] border border-red-500/20 flex gap-3 items-start">
-                      <div className="w-4 h-4 rounded-full bg-red-500/20 text-red-500 flex items-center justify-center mt-0.5 text-[10px] font-bold">!</div>
+            <div className="absolute top-0 w-full h-1/2 bg-gradient-to-b from-[#0D9488]/10 to-transparent pointer-events-none"></div>
+            <div className="max-w-md w-full text-center space-y-6 bg-[#0E1524]/80 backdrop-blur-xl p-8 rounded-[28px] border border-white/5 animate-in zoom-in-95 duration-500 mx-4 shadow-[0_20px_50px_rgba(0,0,0,0.5)]">
+              
+              <div className="w-14 h-14 bg-[#0D9488]/10 rounded-2xl flex items-center justify-center border border-[#0D9488]/20 mx-auto shadow-inner">
+                <svg className="w-6 h-6 text-[#0D9488]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                </svg>
+              </div>
+
+              <div className="space-y-2">
+                <h1 className="text-2xl font-bold tracking-tight text-white">AI Assistant Security Portal</h1>
+                <p className="text-xs text-white/50 leading-relaxed">
+                  Before we initiate the voice call, please review the security checklist.
+                </p>
+              </div>
+
+              <div className="grid gap-3 text-left">
+                  <div className="bg-[#121B2D]/80 p-4 rounded-xl border border-white/5 flex gap-3.5 items-center">
+                      <div className="w-5 h-5 rounded-full bg-[#0D9488]/20 text-[#0D9488] flex items-center justify-center text-[10px] font-bold">✓</div>
                       <div>
-                          <p className="text-xs font-bold text-white mb-0.5">Zero Tolerance Policy</p>
-                          <p className="text-[10px] text-white/60 leading-tight">If you exit Fullscreen or multiple faces are detected, the interview will terminate.</p>
+                        <p className="text-xs font-bold text-white">Real-Time Proctored Session</p>
+                        <p className="text-[10px] text-white/40">Face, gaze, and secondary device detection are active.</p>
+                      </div>
+                  </div>
+                  <div className="bg-red-500/5 p-4 rounded-xl border border-red-500/10 flex gap-3.5 items-start">
+                      <div className="w-5 h-5 rounded-full bg-red-500/20 text-red-400 flex items-center justify-center mt-0.5 text-[10px] font-bold">!</div>
+                      <div>
+                          <p className="text-xs font-bold text-white mb-0.5">Integrity & Focus Rules</p>
+                          <p className="text-[10px] text-white/40 leading-tight">Exiting frame or using secondary devices will terminate the session immediately.</p>
                       </div>
                   </div>
               </div>
-              <Button size="lg" className="w-full h-11 text-sm rounded-[14px] font-bold" onClick={startCall}>
-                Start Interview
+
+              <Button 
+                size="lg" 
+                className="w-full h-12 text-xs uppercase tracking-widest bg-[#0D9488] hover:bg-[#0F766E] text-white shadow-[0_4px_20px_rgba(13,148,136,0.3)] rounded-[16px] font-bold transition-all hover:scale-[1.02] active:scale-[0.98]" 
+                onClick={startCall}
+              >
+                Enter Interview Room
               </Button>
             </div>
         </div>
@@ -754,86 +816,173 @@ All candidate responses are automatically recorded. Ensure you clearly distingui
 
       {/* --- LIVE INTERVIEW --- */}
       {(status === 'connecting' || status === 'live') && (
-        <div className="absolute inset-0 z-0 bg-black flex flex-col">
+        <div className="absolute inset-0 z-0 bg-[#070A13] flex flex-col font-sans">
           
           {/* CONNECTING OVERLAY */}
           {status === 'connecting' && (
-              <div className="absolute inset-0 z-50 bg-black/90 backdrop-blur-xl flex flex-col items-center justify-center space-y-6 animate-in fade-in duration-500">
+              <div className="absolute inset-0 z-50 bg-[#070A13]/95 backdrop-blur-xl flex flex-col items-center justify-center space-y-6 animate-in fade-in duration-500">
                   <div className="relative">
-                     <div className="w-20 h-20 rounded-full border-4 border-[#007AFF]/30 border-t-[#007AFF] animate-spin"></div>
+                     <div className="w-24 h-24 rounded-full border-4 border-[#0D9488]/10 border-t-[#0D9488] animate-spin shadow-[0_0_30px_rgba(13,148,136,0.2)]"></div>
                      <div className="absolute inset-0 flex items-center justify-center">
-                        <div className="w-2 h-2 bg-[#007AFF] rounded-full animate-pulse"></div>
+                        <div className="w-3 h-3 bg-[#0D9488] rounded-full animate-ping"></div>
                      </div>
                   </div>
                   <div className="text-center space-y-2">
-                      <h2 className="text-xl font-bold text-white tracking-tight">Connecting to AI Agent</h2>
-                      <p className="text-xs text-white/50">Verifying secure environment...</p>
+                      <h2 className="text-lg font-bold text-white tracking-wider uppercase">Calibrating Secure Room</h2>
+                      <p className="text-xs text-white/40">Linking with dynamic conversational AI...</p>
                   </div>
               </div>
           )}
 
           {/* WARNING OVERLAY */}
           {faceWarning && (
-              <div className="absolute top-24 left-1/2 -translate-x-1/2 z-40 bg-red-600/90 backdrop-blur-md text-white px-8 py-4 rounded-full shadow-[0_0_50px_rgba(220,38,38,0.5)] border border-red-400 animate-pulse flex items-center gap-3">
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
-                  <span className="font-bold text-sm tracking-wide">{faceWarning}</span>
+              <div className="absolute top-28 left-1/2 -translate-x-1/2 z-40 bg-red-600/95 backdrop-blur-md text-white px-6 py-3.5 rounded-full shadow-[0_10px_40px_rgba(220,38,38,0.4)] border border-red-500/20 animate-bounce flex items-center gap-3">
+                  <svg className="w-5 h-5 flex-shrink-0 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                  <span className="font-bold text-xs tracking-wider uppercase">{faceWarning}</span>
               </div>
           )}
 
-          {/* MAIN VISUAL AREA */}
-          <div className="relative flex-1 flex items-center justify-center overflow-hidden bg-[#0a0a0a]">
-             
-             {/* PIP Video Feed (Visible for user assurance) */}
-             <div className="absolute top-6 right-6 w-48 h-36 bg-black rounded-[16px] border border-white/20 overflow-hidden shadow-2xl z-30">
-                <video 
-                    ref={videoRef} 
-                    autoPlay 
-                    playsInline 
-                    muted 
-                    className="w-full h-full object-cover transform scale-x-[-1]"
-                />
-                <div className="absolute bottom-2 left-2 flex gap-1.5">
-                    <div className="bg-black/60 backdrop-blur-sm px-2 py-0.5 rounded text-[8px] font-bold flex items-center gap-1">
-                        <div className={`w-1.5 h-1.5 rounded-full ${faceCount === 1 ? 'bg-green-500' : 'bg-red-500 animate-pulse'}`}></div>
-                        {faceCount} FACE(S)
-                    </div>
+          {/* FUTURISTIC TOP HEADER */}
+          <header className="h-20 w-full bg-gradient-to-b from-[#070A13] to-transparent flex items-center justify-between px-8 relative z-20">
+             <div className="flex items-center gap-3">
+                <div className="w-3 h-3 rounded-full bg-[#0D9488] animate-pulse shadow-[0_0_10px_#0D9488]"></div>
+                <div>
+                   <h2 className="text-xs font-bold text-white/90 tracking-widest uppercase">Secure Portal • Live Session</h2>
+                   <p className="text-[9px] font-bold text-[#0D9488] tracking-widest uppercase mt-0.5">{interview.jobRole}</p>
                 </div>
              </div>
              
-             {/* Audio Visualizer */}
-             <div className="relative z-10 flex flex-col items-center">
-                 <div className={`w-40 h-40 rounded-full bg-black/40 backdrop-blur-md border border-white/10 flex items-center justify-center shadow-[0_0_100px_rgba(0,122,255,0.1)] transition-all duration-100`} style={{ transform: `scale(${1 + Math.min(volumeLevel, 0.5)})` }}>
-                     <div className="flex gap-1.5 items-center h-12">
-                         {[...Array(7)].map((_, i) => (
-                             <div key={i} className="w-2 bg-[#007AFF] rounded-full transition-all duration-75 shadow-[0_0_15px_#007AFF]" style={{ height: Math.max(12, volumeLevel * 80 * (Math.random() + 0.5)) + 'px' }}></div>
-                         ))}
+             {/* Timer HUD */}
+             <div className="bg-[#121B2D]/80 backdrop-blur-md px-4 py-2 rounded-xl border border-white/5 shadow-md flex items-center gap-3">
+                <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></div>
+                <span className="text-[10px] font-mono font-bold tracking-widest text-white/80">
+                   {status === 'connecting' ? 'INITIALIZING' : `REC • ${formatTime(timeElapsed)}`}
+                </span>
+             </div>
+          </header>
+
+          {/* MAIN CONTENT AREA: TWO PANELS (AI INTERVIEWER VS SECURITY CAMERA MONITOR) */}
+          <div className="flex-1 w-full max-w-7xl mx-auto px-6 md:px-8 pb-32 pt-4 grid grid-cols-1 lg:grid-cols-12 gap-6 items-center z-10">
+             
+             {/* LEFT PANEL (7 cols): AI Hologram Visualizer */}
+             <div className="lg:col-span-7 flex flex-col items-center justify-center bg-[#0C1222]/40 backdrop-blur-md rounded-[32px] border border-white/5 p-12 h-full min-h-[350px] relative overflow-hidden group shadow-2xl">
+                 <div className="absolute inset-0 bg-radial-glow opacity-30 pointer-events-none"></div>
+                 
+                 {/* Visualizer Module */}
+                 <div className="relative flex flex-col items-center justify-center">
+                     {/* Dynamic Concentric Glow Rings */}
+                     <div 
+                        className="absolute w-52 h-52 rounded-full border border-[#0D9488]/10 transition-transform duration-200"
+                        style={{ transform: `scale(${1 + volumeLevel * 0.4})`, opacity: 0.15 + volumeLevel * 0.5 }}
+                     ></div>
+                     <div 
+                        className="absolute w-44 h-44 rounded-full border border-[#0D9488]/20 transition-transform duration-150"
+                        style={{ transform: `scale(${1 + volumeLevel * 0.2})`, opacity: 0.3 + volumeLevel * 0.5 }}
+                     ></div>
+
+                     {/* Main Core Bubble */}
+                     <div 
+                        className="w-36 h-36 rounded-full bg-[#121B2D] border-2 border-white/10 flex items-center justify-center transition-all duration-100 shadow-[0_0_80px_rgba(13,148,136,0.1)] relative z-10"
+                        style={{ 
+                          borderColor: volumeLevel > 0.05 ? '#0D9488' : 'rgba(255,255,255,0.1)',
+                          boxShadow: volumeLevel > 0.05 
+                            ? `0 0 50px rgba(13,148,136, ${0.1 + volumeLevel * 0.8})` 
+                            : '0 0 30px rgba(0,0,0,0.5)'
+                        }}
+                     >
+                         {/* Dynamic Wave Bars inside Core */}
+                         <div className="flex gap-1.5 items-center justify-center h-16 w-24">
+                             {[...Array(7)].map((_, i) => (
+                                 <div 
+                                     key={i} 
+                                     className="w-1.5 rounded-full transition-all duration-75 shadow-[0_0_10px_#0D9488]" 
+                                     style={{ 
+                                       backgroundColor: volumeLevel > 0.05 ? '#0D9488' : 'rgba(255,255,255,0.3)',
+                                       height: Math.max(8, volumeLevel * 90 * (Math.sin(i * 0.5) + 0.8)) + 'px' 
+                                     }}
+                                 ></div>
+                             ))}
+                         </div>
+                     </div>
+
+                     <div className="absolute -bottom-8 flex flex-col items-center">
+                        <span className="text-[10px] font-bold text-white/40 tracking-[0.3em] uppercase">
+                           {volumeLevel > 0.05 ? 'AI AGENT SPEAKING' : 'AI AGENT LISTENING'}
+                        </span>
                      </div>
                  </div>
-                 <p className="mt-8 text-white/30 text-xs font-medium tracking-[0.2em] uppercase">AI Agent Listening</p>
              </div>
 
-             {/* Background Grid */}
-             <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.03)_1px,transparent_1px)] bg-[size:60px_60px] pointer-events-none"></div>
+             {/* RIGHT PANEL (5 cols): Holographic Security Monitor with Camera Feed */}
+             <div className="lg:col-span-5 flex flex-col gap-5 h-full justify-center">
+                 
+                 {/* Glass-Morphic Camera Panel */}
+                 <div className="bg-[#0C1222]/80 backdrop-blur-md rounded-[32px] border border-white/5 p-6 flex flex-col gap-4 shadow-2xl relative overflow-hidden">
+                     <div className="absolute top-0 left-0 w-8 h-8 border-t-2 border-l-2 border-[#0D9488]/30 rounded-tl-xl pointer-events-none"></div>
+                     <div className="absolute top-0 right-0 w-8 h-8 border-t-2 border-r-2 border-[#0D9488]/30 rounded-tr-xl pointer-events-none"></div>
+                     <div className="absolute bottom-0 left-0 w-8 h-8 border-b-2 border-l-2 border-[#0D9488]/30 rounded-bl-xl pointer-events-none"></div>
+                     <div className="absolute bottom-0 right-0 w-8 h-8 border-b-2 border-r-2 border-[#0D9488]/30 rounded-br-xl pointer-events-none"></div>
+                     
+                     <div className="flex items-center justify-between">
+                         <span className="text-[10px] font-bold text-white/40 tracking-wider uppercase">CANDIDATE SECURE STREAM</span>
+                         <div className="flex items-center gap-2">
+                             <span className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_#10B981]"></span>
+                             <span className="text-[9px] font-bold text-white/60 tracking-wider uppercase">PROCTORED</span>
+                         </div>
+                     </div>
+
+                     {/* Camera Container */}
+                     <div className="w-full aspect-[4/3] bg-[#070A13] rounded-2xl border border-white/5 overflow-hidden shadow-inner relative group">
+                        <video 
+                            ref={videoRef} 
+                            autoPlay 
+                            playsInline 
+                            muted 
+                            className="w-full h-full object-cover transform scale-x-[-1]"
+                        />
+                        
+                        {/* HUD overlays */}
+                        <div className="absolute bottom-3 left-3 flex gap-2">
+                            <div className="bg-black/60 backdrop-blur-sm px-2.5 py-1 rounded-lg text-[9px] font-bold flex items-center gap-1.5 border border-white/5">
+                                <div className={`w-1.5 h-1.5 rounded-full ${faceCount === 1 ? 'bg-[#0D9488] shadow-[0_0_8px_#0D9488]' : 'bg-red-500 animate-pulse'}`}></div>
+                                {faceCount === 0 ? 'NO FACE DETECTED' : faceCount > 1 ? 'MULTI-FACE WARNING' : 'FACE ENROLLED'}
+                            </div>
+                        </div>
+                     </div>
+
+                     {/* Angle Bypass controls */}
+                     <div className="pt-2">
+                        <button
+                           onClick={() => setCameraAtAngle(prev => !prev)}
+                           className={`w-full py-3 px-4 rounded-xl border text-[10px] font-bold tracking-wider uppercase transition-all flex items-center justify-center gap-2 ${
+                             cameraAtAngle 
+                               ? 'bg-amber-500/10 text-amber-400 border-amber-500/30 shadow-[0_0_20px_rgba(245,158,11,0.1)]' 
+                               : 'bg-white/5 text-white/50 border-white/5 hover:bg-white/10 hover:text-white'
+                           }`}
+                        >
+                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                           </svg>
+                           {cameraAtAngle ? 'Off-Angle Compensation Enabled' : 'My camera is at an angle'}
+                        </button>
+                     </div>
+                 </div>
+
+             </div>
           </div>
           
-          {/* HUD Footer */}
-          <div className="absolute bottom-0 w-full z-20 p-8 flex flex-col items-center bg-gradient-to-t from-black via-black/80 to-transparent">
-             
-             {/* Status Badge */}
-             <div className="flex items-center gap-2 mb-8 bg-white/5 px-4 py-2 rounded-full border border-white/10">
-                 <div className={`w-2 h-2 bg-red-500 rounded-full ${status === 'live' ? 'animate-pulse' : ''}`}></div>
-                 <span className="text-xs font-bold tracking-[0.2em] text-white/80">
-                    {status === 'connecting' ? 'INITIALIZING' : `REC • ${formatTime(timeElapsed)}`}
-                 </span>
-             </div>
-
-             <Button 
-                onClick={handleManualEnd}
-                className="w-full max-w-sm h-14 rounded-2xl bg-red-600 hover:bg-red-700 text-white font-bold shadow-[0_0_30px_rgba(220,38,38,0.3)] transition-transform active:scale-95 flex items-center justify-center gap-3"
-             >
-                <div className="w-4 h-4 bg-white rounded-[2px]"></div>
-                END INTERVIEW
-             </Button>
+          {/* FLOATING ACTION HUD BAR */}
+          <div className="absolute bottom-0 w-full z-20 p-8 flex flex-col items-center bg-gradient-to-t from-[#070A13] via-[#070A13]/90 to-transparent">
+              <Button 
+                 onClick={handleManualEnd}
+                 className="w-full max-w-sm h-14 rounded-2xl bg-red-600 hover:bg-red-700 text-white font-bold shadow-[0_10px_35px_rgba(220,38,38,0.3)] hover:shadow-[0_10px_45px_rgba(220,38,38,0.5)] transition-all hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-3 border border-red-500/30"
+              >
+                 <div className="w-3.5 h-3.5 bg-white rounded-sm shadow-md animate-pulse"></div>
+                 <span className="tracking-widest text-xs font-black uppercase">END INTERVIEW</span>
+              </Button>
           </div>
         </div>
       )}

@@ -39,12 +39,6 @@ export const Results: React.FC<{ interviewId: string, onBack: () => void }> = ({
   };
 
   const runEvaluation = async (session: InterviewSession) => {
-    if (session.status === 'terminated_early') {
-      setSelectedSession(session);
-      setEvaluation(null);
-      return;
-    }
-
     setLoading(true);
     setSelectedSession(session);
     setEvaluation(null); // Reset prev evaluation while loading
@@ -58,6 +52,11 @@ export const Results: React.FC<{ interviewId: string, onBack: () => void }> = ({
       }
 
       const responses = await db.responses.getBySession(session.id);
+      if (responses.length === 0) {
+        setLoading(false);
+        return;
+      }
+
       const result = await aiService.evaluateCandidate(
         interview!.jobRole,
         interview!.parameters,
@@ -214,14 +213,47 @@ export const Results: React.FC<{ interviewId: string, onBack: () => void }> = ({
           </div>
         </div>
 
-        {selectedSession.status === 'terminated_early' ? (
-           <div className="bg-red-500/10 p-12 rounded-[24px] text-center space-y-6 border border-red-500/20 mt-8">
-             <div className="text-5xl mb-2">🚫</div>
-             <h2 className="text-3xl font-bold text-red-500 tracking-tight uppercase">Flagged</h2>
-             <p className="text-lg font-medium text-white/80 max-w-xl mx-auto">"{selectedSession.terminationReason}"</p>
-           </div>
-        ) : evaluation ? (
+        {/* If session has no evaluation because of 0 responses */}
+        {!evaluation && (
+          <div className="bg-[#151D30] p-12 rounded-[24px] text-center space-y-4 border border-white/10 mt-8">
+            <div className="text-4xl">📭</div>
+            <h2 className="text-xl font-bold text-white uppercase tracking-wider">No Responses Logged</h2>
+            <p className="text-sm text-white/50 max-w-lg mx-auto">
+              This candidate started the session, but did not complete any questions or did not record any verbal answers before the session ended. 
+              {selectedSession.status === 'terminated_early' && ` (Reason: ${selectedSession.terminationReason})`}
+            </p>
+            <div className="flex justify-center items-center gap-4 pt-6">
+               <Button 
+                  onClick={() => updateDecision('failed')} 
+                  className={`w-32 rounded-full h-10 text-[10px] font-bold uppercase tracking-widest transition-all ${
+                     selectedSession.decision === 'failed' ? 'bg-red-500 text-white shadow-[0_0_20px_rgba(239,68,68,0.4)]' : 'bg-[#1C1C1E] border border-white/10 text-white/40 hover:text-white hover:bg-white/10'
+                  }`}
+               >
+                  Reject
+               </Button>
+               <Button 
+                  onClick={() => updateDecision('passed')} 
+                  className={`w-32 rounded-full h-10 text-[10px] font-bold uppercase tracking-widest transition-all ${
+                     selectedSession.decision === 'passed' ? 'bg-green-500 text-white shadow-[0_0_20px_rgba(34,197,94,0.4)]' : 'bg-[#1C1C1E] border border-white/10 text-white/40 hover:text-white hover:bg-white/10'
+                  }`}
+               >
+                  Approve
+               </Button>
+            </div>
+          </div>
+        )}
+
+        {evaluation && (
           <>
+            {/* Warning header if early-terminated but has evaluation */}
+            {selectedSession.status === 'terminated_early' && (
+              <div className="bg-amber-500/10 p-4 rounded-xl border border-amber-500/20 text-xs font-bold text-amber-400 flex items-center gap-2 mb-4">
+                <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+                <span>NOTE: THE SESSION ENDED EARLY OR WAS FLAGGED ("{selectedSession.terminationReason}"). EVALUATION IS GENERATED FROM COMPLETED ANSWERS.</span>
+              </div>
+            )}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4">
             
             {/* Block 1: Overall Fit Score (Large Square) */}
@@ -314,7 +346,7 @@ export const Results: React.FC<{ interviewId: string, onBack: () => void }> = ({
              </Button>
           </div>
           </>
-        ) : null}
+        )}
 
         {/* Toast Notification */}
         {showToast && (

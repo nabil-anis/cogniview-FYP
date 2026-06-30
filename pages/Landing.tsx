@@ -4,19 +4,19 @@ import { motion } from 'framer-motion';
 
 // --- Icons ---
 const BrainIcon = () => (
-  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-[#007AFF]"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"/></svg>
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-white"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"/></svg>
 );
 
 const MicIcon = () => (
-  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-[#007AFF]"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-white"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
 );
 
 const ShieldIcon = () => (
-  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-[#007AFF]"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></svg>
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-white"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></svg>
 );
 
 const AnalyticsIcon = () => (
-  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-[#007AFF]"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-white"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
 );
 
 // --- Component ---
@@ -125,7 +125,7 @@ export const Landing: React.FC<{ onNavigate: (page: string) => void }> = ({ onNa
               },
             }}
           >
-            <div className="w-14 h-14 rounded-2xl bg-[#007AFF]/5 backdrop-blur-md border border-[#007AFF]/20 flex items-center justify-center shadow-[0_0_30px_rgba(0,122,255,0.1)]">
+            <div className="w-14 h-14 rounded-2xl bg-white/5 backdrop-blur-md border border-white/10 flex items-center justify-center shadow-lg">
               {item.icon}
             </div>
             <span className="text-[9px] font-bold text-white/50 uppercase tracking-widest mt-2">
@@ -147,16 +147,16 @@ export const Landing: React.FC<{ onNavigate: (page: string) => void }> = ({ onNa
             transition={{ duration: 0.6, delay: 0.4 }}
             className="px-3 py-1 rounded-full bg-white/5 border border-white/10 backdrop-blur-md shadow-lg"
           >
-            <span className="text-[9px] font-bold text-[#007AFF] tracking-widest uppercase">
+            <span className="text-[9px] font-bold text-slate-300 tracking-widest uppercase">
               Intelligence Engine v2.5
             </span>
           </motion.div>
 
           {/* Title - Reduced Size */}
-          <h1 className="text-5xl md:text-7xl font-bold tracking-tight text-white leading-[1.1]">
+          <h1 className="text-4xl sm:text-5xl md:text-7xl font-bold tracking-tight text-white leading-[1.1]">
             The Future of
             <br />
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#007AFF] via-[#5AC8FA] to-[#007AFF]">
+            <span className="text-white">
               Verbal Intelligence.
             </span>
           </h1>
@@ -176,10 +176,10 @@ export const Landing: React.FC<{ onNavigate: (page: string) => void }> = ({ onNa
             <motion.button
               whileHover={{ scale: 1.05 }}
               onClick={() => onNavigate('login-recruiter')}
-              className="px-8 py-3 rounded-xl transition-all group relative overflow-hidden bg-[#007AFF] text-sm font-semibold text-white shadow-[0_10px_30px_rgba(0,122,255,0.25)]"
+              className="px-8 py-3 rounded-xl transition-all group relative overflow-hidden bg-white text-sm font-semibold text-black hover:bg-neutral-200 shadow-md"
             >
               <span className="relative z-10">Start Hiring Now</span>
-              <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300"></div>
+              <div className="absolute inset-0 bg-black/5 translate-y-full group-hover:translate-y-0 transition-transform duration-300"></div>
             </motion.button>
 
             <motion.button
@@ -222,7 +222,7 @@ export const Landing: React.FC<{ onNavigate: (page: string) => void }> = ({ onNa
       <div id="architecture" className="relative z-20 w-full max-w-6xl mx-auto px-6 py-20">
         <div className="flex flex-col md:flex-row items-end justify-between mb-8 gap-6">
            <div className="space-y-2">
-             <span className="inline-block px-2.5 py-0.5 rounded-full bg-[#007AFF]/10 border border-[#007AFF]/20 text-[#007AFF] text-[9px] font-bold uppercase tracking-widest">
+             <span className="inline-block px-2.5 py-0.5 rounded-full bg-white/5 border border-white/10 text-white/80 text-[9px] font-bold uppercase tracking-widest">
                 Final Year Project
              </span>
              <h2 className="text-3xl font-bold tracking-tight text-white">Project Specs</h2>
@@ -232,7 +232,7 @@ export const Landing: React.FC<{ onNavigate: (page: string) => void }> = ({ onNa
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 auto-rows-min">
            {/* Cell 1: Core Innovation */}
            <div className="md:col-span-2 row-span-2 glass rounded-[24px] p-8 border border-white/10 relative overflow-hidden group min-h-[300px]">
-              <div className="absolute top-0 right-0 w-60 h-60 bg-[#007AFF]/20 blur-[80px] rounded-full group-hover:bg-[#007AFF]/30 transition-all duration-700"></div>
+              <div className="absolute top-0 right-0 w-60 h-60 bg-white/[0.02] blur-[80px] rounded-full group-hover:bg-white/[0.04] transition-all duration-700"></div>
               <div className="relative z-10 h-full flex flex-col justify-between">
                  <div>
                     <div className="w-10 h-10 rounded-xl bg-white text-black flex items-center justify-center mb-4 shadow-lg">
@@ -259,7 +259,7 @@ export const Landing: React.FC<{ onNavigate: (page: string) => void }> = ({ onNa
                   <p className="text-[9px] font-bold uppercase tracking-widest text-white/40 mb-1">System Latency</p>
                   <p className="text-3xl font-bold text-white">&lt; 40ms <span className="text-xs text-white/40 font-normal">avg</span></p>
                </div>
-               <div className="w-14 h-14 rounded-full border-2 border-[#007AFF]/20 border-t-[#007AFF] animate-spin"></div>
+               <div className="w-14 h-14 rounded-full border-2 border-white/10 border-t-white animate-spin"></div>
            </div>
 
            {/* Cell 3: Team Roster (Merged) */}
@@ -268,7 +268,7 @@ export const Landing: React.FC<{ onNavigate: (page: string) => void }> = ({ onNa
                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                  {teamMembers.map((member, i) => (
                     <div key={i} className="flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 transition-colors">
-                        <div className="w-8 h-8 rounded-md bg-white/5 flex items-center justify-center text-[#007AFF] font-bold text-xs">
+                        <div className="w-8 h-8 rounded-md bg-white/5 flex items-center justify-center text-white font-bold text-xs">
                           {member.name.charAt(0)}
                         </div>
                         <div>

@@ -171,33 +171,33 @@ export const Auth: React.FC<AuthProps> = ({ onAuth, onBack, initialRole = 'recru
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] h-[400px] bg-[#007AFF]/5 blur-[100px] rounded-full pointer-events-none"></div>
 
       {/* Explicit Back Button & Theme Toggle */}
-      <div className="absolute top-6 left-6 right-6 z-20 flex flex-row items-center justify-between gap-4">
+      <div className="absolute top-6 left-6 right-6 z-20 flex flex-row items-center justify-between gap-2 md:gap-4">
         <button 
           onClick={onBack}
-          className="flex items-center gap-2 px-4 py-2 rounded-full bg-white/5 border border-white/10 hover:bg-white/10 transition-colors text-xs font-bold text-white/80"
+          className="flex items-center gap-2 px-3 md:px-4 py-2 rounded-full bg-white/5 border border-white/10 hover:bg-white/10 transition-colors text-xs font-bold text-white/80"
         >
           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
-          <span>Back to Home</span>
+          <span>Back<span className="hidden sm:inline"> to Home</span></span>
         </button>
 
         <div className="flex bg-white/5 p-1 rounded-full border border-white/5 items-center">
           <button 
             type="button"
             onClick={() => setThemeMode('dark')}
-            className={`px-3 py-1.5 rounded-full text-[10px] font-bold transition-all flex items-center gap-1 uppercase tracking-wider ${themeMode === 'dark' ? 'bg-white text-black shadow-md' : 'text-white/40 hover:text-white/70'}`}
+            className={`px-2.5 md:px-3 py-1.5 rounded-full text-[10px] font-bold transition-all flex items-center gap-1 uppercase tracking-wider ${themeMode === 'dark' ? 'bg-white text-black shadow-md' : 'text-white/40 hover:text-white/70'}`}
             title="Space Dark Mode"
           >
             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/></svg>
-            Dark
+            <span className="hidden sm:inline">Dark</span>
           </button>
           <button 
             type="button"
             onClick={() => setThemeMode('light')}
-            className={`px-3 py-1.5 rounded-full text-[10px] font-bold transition-all flex items-center gap-1 uppercase tracking-wider ${themeMode === 'light' ? 'bg-white text-black shadow-md' : 'text-white/40 hover:text-white/70'}`}
+            className={`px-2.5 md:px-3 py-1.5 rounded-full text-[10px] font-bold transition-all flex items-center gap-1 uppercase tracking-wider ${themeMode === 'light' ? 'bg-white text-black shadow-md' : 'text-white/40 hover:text-white/70'}`}
             title="Pristine Light Mode"
           >
             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364l-.707.707M6.343 17.657l-.707.707m0-11.314l.707.707m11.314 11.314l.707-.707M12 5a7 7 0 100 14 7 7 0 000-14z"/></svg>
-            Light
+            <span className="hidden sm:inline">Light</span>
           </button>
         </div>
       </div>

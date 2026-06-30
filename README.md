@@ -1,13 +1,14 @@
 
 # Cogniview - Intelligence Reimagined
 
-**Final Year Project (FYP)**
+🎓 **University Final Year Project (FYP)**  
+An advanced, multi-tenant multimodal AI recruitment and assessment platform built as a university Final Year Project.
 
-## Project Team
-*   **Muhammad Hassan Nadeem** (Se221109)
-*   **Muhammad Hamza irfan** (Se221114)
+## 👥 Project Team
+*   **Muhammad Hassan Nadeem** (SE221109)
+*   **Muhammad Hamza Irfan** (SE221114)
 *   **Abdul Rehman Paracha** (SE221068)
-*   **M.Ahsan** (SE221099)
+*   **M. Ahsan** (SE221099)
 
 ## About the Project
 Cogniview is a next-generation recruitment platform that leverages multimodal Generative AI to conduct real-time, autonomous verbal interviews. 
