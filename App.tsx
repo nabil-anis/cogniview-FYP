@@ -9,6 +9,7 @@ import { IntervieweeDashboard } from './pages/interviewee/Dashboard';
 import { Results } from './pages/recruiter/Results';
 import { db } from './services/db';
 import { Profile } from './types';
+import { Info, InfoTopic } from './pages/Info';
 
 const App: React.FC = () => {
   const [currentPage, setCurrentPage] = useState('landing');
@@ -127,6 +128,21 @@ const App: React.FC = () => {
   const borderPrimary = currentPage === 'landing' ? 'rgba(255, 255, 255, 0.05)' : 'rgba(255, 255, 255, 0.08)';
 
   const renderPage = () => {
+    if (currentPage.startsWith('info-')) {
+      const topic = currentPage.replace('info-', '') as InfoTopic;
+      return <Info topic={topic} onBack={() => {
+        if (currentUser) {
+          if (currentUser.role === 'recruiter') {
+            setCurrentPage('dashboard');
+          } else {
+            setCurrentPage('candidate-dashboard');
+          }
+        } else {
+          setCurrentPage('landing');
+        }
+      }} />;
+    }
+
     if (!currentUser) {
       if (currentPage === 'login-recruiter') return <Auth onAuth={handleAuth} onBack={() => setCurrentPage('landing')} initialRole="recruiter" />;
       if (currentPage === 'login-candidate') return <Auth onAuth={handleAuth} onBack={() => setCurrentPage('landing')} initialRole="interviewee" />;

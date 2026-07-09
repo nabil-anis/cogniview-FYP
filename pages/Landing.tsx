@@ -82,12 +82,18 @@ export const Landing: React.FC<{ onNavigate: (page: string) => void }> = ({ onNa
 
         {/* Navigation */}
         <nav className="hidden lg:flex flex-row items-center gap-6" aria-label="Main navigation">
-          {["For Recruiters", "For Candidates", "Enterprise", "Security"].map((label, index) => (
+          {[
+            { label: "For Recruiters", key: "info-for-recruiters" },
+            { label: "For Candidates", key: "info-for-candidates" },
+            { label: "Enterprise", key: "info-enterprise" },
+            { label: "Security", key: "info-security" }
+          ].map((item, index) => (
             <button
               key={index}
-              className="hover:text-[#007AFF] transition-colors text-xs font-medium text-white/70"
+              onClick={() => onNavigate(item.key)}
+              className="hover:text-[#007AFF] hover:scale-105 transition-all text-xs font-medium text-white/70 cursor-pointer"
             >
-              {label}
+              {item.label}
             </button>
           ))}
         </nav>
@@ -301,15 +307,15 @@ export const Landing: React.FC<{ onNavigate: (page: string) => void }> = ({ onNa
                <div className="space-y-3">
                   <h4 className="text-[10px] font-bold text-white uppercase tracking-widest">Platform</h4>
                   <ul className="space-y-1.5 text-xs text-white/60">
-                     <li className="hover:text-white cursor-pointer transition-colors">Recruiters</li>
-                     <li className="hover:text-white cursor-pointer transition-colors">Candidates</li>
+                     <li onClick={() => onNavigate('info-for-recruiters')} className="hover:text-white cursor-pointer transition-colors">Recruiters</li>
+                     <li onClick={() => onNavigate('info-for-candidates')} className="hover:text-white cursor-pointer transition-colors">Candidates</li>
                   </ul>
                </div>
                <div className="space-y-3">
                   <h4 className="text-[10px] font-bold text-white uppercase tracking-widest">Legal</h4>
                   <ul className="space-y-1.5 text-xs text-white/60">
-                     <li className="hover:text-white cursor-pointer transition-colors">Privacy</li>
-                     <li className="hover:text-white cursor-pointer transition-colors">Terms</li>
+                     <li onClick={() => onNavigate('info-privacy')} className="hover:text-white cursor-pointer transition-colors">Privacy</li>
+                     <li onClick={() => onNavigate('info-terms')} className="hover:text-white cursor-pointer transition-colors">Terms</li>
                   </ul>
                </div>
             </div>
