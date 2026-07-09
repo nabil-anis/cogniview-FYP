@@ -50,6 +50,9 @@ export const IntervieweeDashboard: React.FC<{ user: Profile, onNavigate: (page: 
               return;
           }
 
+          // Ensure profile is saved to Supabase database first to prevent foreign key issues
+          await db.profiles.save(user);
+
           // Create new session
           const session = {
               id: Math.random().toString(36).substr(2, 9),
@@ -66,8 +69,8 @@ export const IntervieweeDashboard: React.FC<{ user: Profile, onNavigate: (page: 
           await db.sessions.save(session);
           onNavigate('interview-room');
       } catch (e) {
-          console.error(e);
-          alert("Error joining session.");
+          console.error("Error joining session:", e);
+          alert(`Error joining session: ${e instanceof Error ? e.message : 'Unknown database error'}`);
           setLoading(false);
       }
   };
@@ -148,11 +151,12 @@ export const IntervieweeDashboard: React.FC<{ user: Profile, onNavigate: (page: 
                                   <p className="text-xs font-bold text-white">{new Date(s.startedAt).toLocaleDateString()}</p>
                               </div>
                               <div className={`px-4 py-1.5 rounded-full text-[9px] font-bold uppercase tracking-widest border whitespace-nowrap ${
+                                  s.status === 'in_progress' ? 'bg-amber-500/10 text-amber-500 border-amber-500/20' :
                                   s.decision === 'passed' ? 'bg-green-500/10 text-green-500 border-green-500/20' : 
                                   s.decision === 'failed' ? 'bg-red-500/10 text-red-500 border-red-500/20' : 
                                   'bg-white/5 text-white/40 border-white/10'
                               }`}>
-                                  {s.decision}
+                                  {s.status === 'in_progress' ? 'In Progress' : s.decision}
                               </div>
                           </div>
                       </div>
@@ -161,23 +165,41 @@ export const IntervieweeDashboard: React.FC<{ user: Profile, onNavigate: (page: 
                       {expandedId === s.id && (
                           <div className="px-4 pb-4 pt-0 animate-in slide-in-from-top-2 duration-300">
                               <div className={`p-3 rounded-xl border ${
+                                  s.status === 'in_progress' ? 'bg-amber-500/5 border-amber-500/10' :
                                   s.decision === 'passed' ? 'bg-green-500/10 border-green-500/20' : 
                                   s.decision === 'failed' ? 'bg-red-500/10 border-red-500/20' : 
                                   'bg-white/5 border-white/10'
                               }`}>
-                                  {s.decision === 'passed' && (
+                                  {s.status === 'in_progress' ? (
+                                      <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+                                          <div className="flex items-center gap-2 text-amber-400">
+                                              <span className="relative flex h-2 w-2">
+                                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                                                  <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+                                              </span>
+                                              <p className="font-semibold text-xs">This assessment is currently active and incomplete.</p>
+                                          </div>
+                                          <Button 
+                                              onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  onNavigate('interview-room');
+                                              }} 
+                                              className="bg-amber-500 hover:bg-amber-600 text-black font-bold text-xs px-4 py-2 rounded-xl"
+                                          >
+                                              Resume Interview
+                                          </Button>
+                                      </div>
+                                  ) : s.decision === 'passed' ? (
                                       <div className="flex items-center gap-2 text-green-400">
                                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                                           <p className="font-medium text-xs">Congratulations, you passed! The recruitment team will be in touch shortly.</p>
                                       </div>
-                                  )}
-                                  {s.decision === 'failed' && (
+                                  ) : s.decision === 'failed' ? (
                                       <div className="flex items-center gap-2 text-red-400">
                                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                                           <p className="font-medium text-xs">You have failed. Better luck next time.</p>
                                       </div>
-                                  )}
-                                  {s.decision === 'pending' && (
+                                  ) : (
                                       <div className="flex items-center gap-2 text-white/50">
                                           <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
                                           <p className="font-medium text-xs">Evaluation in progress...</p>

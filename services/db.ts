@@ -116,55 +116,107 @@ const mapEvaluationFromDb = (e: any): EvaluationResult => ({
 export const db = {
   profiles: {
     getByEmail: async (email: string) => {
-      const { data } = await supabase.from('profiles').select('*').eq('email', email).single();
+      const { data, error } = await supabase.from('profiles').select('*').eq('email', email).single();
+      if (error && error.code !== 'PGRST116') {
+        console.error("Supabase Profile Get Error:", error);
+        throw new Error(error.message);
+      }
       return data ? mapProfileFromDb(data) : undefined;
     },
     save: async (profile: Profile) => {
-      await supabase.from('profiles').upsert(mapProfileToDb(profile));
+      const { error } = await supabase.from('profiles').upsert(mapProfileToDb(profile));
+      if (error) {
+        console.error("Supabase Profile Save Error:", error);
+        throw new Error(error.message);
+      }
     }
   },
   interviews: {
     getAll: async () => {
-      const { data } = await supabase.from('interviews').select('*');
+      const { data, error } = await supabase.from('interviews').select('*');
+      if (error) {
+        console.error("Supabase Interviews GetAll Error:", error);
+        throw new Error(error.message);
+      }
       return (data || []).map(mapInterviewFromDb);
     },
     getByCode: async (code: string) => {
-      const { data } = await supabase.from('interviews').select('*').eq('code', code.toUpperCase()).single();
+      const { data, error } = await supabase.from('interviews').select('*').eq('code', code.toUpperCase()).single();
+      if (error && error.code !== 'PGRST116') {
+        console.error("Supabase Interview GetByCode Error:", error);
+        throw new Error(error.message);
+      }
       return data ? mapInterviewFromDb(data) : undefined;
     },
     save: async (interview: Interview) => {
-      await supabase.from('interviews').upsert(mapInterviewToDb(interview));
+      const { error } = await supabase.from('interviews').upsert(mapInterviewToDb(interview));
+      if (error) {
+        console.error("Supabase Interview Save Error:", error);
+        throw new Error(error.message);
+      }
     },
     delete: async (id: string) => {
-      await supabase.from('interviews').delete().eq('id', id);
+      const { error } = await supabase.from('interviews').delete().eq('id', id);
+      if (error) {
+        console.error("Supabase Interview Delete Error:", error);
+        throw new Error(error.message);
+      }
     }
   },
   sessions: {
     save: async (session: InterviewSession) => {
-      await supabase.from('sessions').upsert(mapSessionToDb(session));
+      const { error } = await supabase.from('sessions').upsert(mapSessionToDb(session));
+      if (error) {
+        console.error("Supabase Session Save Error:", error);
+        throw new Error(error.message);
+      }
     },
     getAll: async () => {
-      const { data } = await supabase.from('sessions').select('*');
+      const { data, error } = await supabase.from('sessions').select('*');
+      if (error) {
+        console.error("Supabase Sessions GetAll Error:", error);
+        throw new Error(error.message);
+      }
       return (data || []).map(mapSessionFromDb);
     },
     getById: async (id: string) => {
-      const { data } = await supabase.from('sessions').select('*').eq('id', id).single();
+      const { data, error } = await supabase.from('sessions').select('*').eq('id', id).single();
+      if (error && error.code !== 'PGRST116') {
+        console.error("Supabase Session GetById Error:", error);
+        throw new Error(error.message);
+      }
       return data ? mapSessionFromDb(data) : undefined;
     },
     getByCandidateId: async (candidateId: string) => {
-      const { data } = await supabase.from('sessions').select('*').eq('candidate_id', candidateId);
+      const { data, error } = await supabase.from('sessions').select('*').eq('candidate_id', candidateId);
+      if (error) {
+        console.error("Supabase Session GetByCandidateId Error:", error);
+        throw new Error(error.message);
+      }
       return (data || []).map(mapSessionFromDb);
     },
     update: async (session: InterviewSession) => {
-      await supabase.from('sessions').upsert(mapSessionToDb(session));
+      const { error } = await supabase.from('sessions').upsert(mapSessionToDb(session));
+      if (error) {
+        console.error("Supabase Session Update Error:", error);
+        throw new Error(error.message);
+      }
     }
   },
   responses: {
     save: async (res: InterviewResponse) => {
-      await supabase.from('responses').upsert(mapResponseToDb(res));
+      const { error } = await supabase.from('responses').upsert(mapResponseToDb(res));
+      if (error) {
+        console.error("Supabase Response Save Error:", error);
+        throw new Error(error.message);
+      }
     },
     getBySession: async (sessionId: string) => {
-      const { data } = await supabase.from('responses').select('*').eq('session_id', sessionId);
+      const { data, error } = await supabase.from('responses').select('*').eq('session_id', sessionId);
+      if (error) {
+        console.error("Supabase Response GetBySession Error:", error);
+        throw new Error(error.message);
+      }
       return (data || []).map(mapResponseFromDb);
     }
   },

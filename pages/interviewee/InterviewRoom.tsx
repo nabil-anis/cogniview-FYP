@@ -1,19 +1,29 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Button } from '../../components/Shared';
+import { Button, BackButton } from '../../components/Shared';
 import { db } from '../../services/db';
-import { Interview, Profile, InterviewSession } from '../../types';
-import Vapi from '@vapi-ai/web';
+import { Interview, Profile, InterviewSession, InterviewResponse } from '../../types';
+import VapiDefault from '@vapi-ai/web';
 import { FaceDetector, ObjectDetector, FilesetResolver } from '@mediapipe/tasks-vision';
 
-export const InterviewRoom: React.FC<{ user: Profile, onComplete: () => void }> = ({ user, onComplete }) => {
+const safeAlert = (msg: string) => {
+  try {
+    alert(msg);
+  } catch (e) {
+    console.warn("Alert blocked/failed:", msg, e);
+  }
+};
+
+export const InterviewRoom: React.FC<{ user: Profile, onComplete: () => void, onBack: () => void }> = ({ user, onComplete, onBack }) => {
   const [session, setSession] = useState<InterviewSession | null>(null);
   const [interview, setInterview] = useState<Interview | null>(null);
-  const [status, setStatus] = useState<'loading' | 'instructions' | 'connecting' | 'live' | 'completed' | 'terminated'>('loading');
+  const [status, setStatus] = useState<'loading' | 'instructions' | 'connecting' | 'live' | 'completed' | 'terminated' | 'saving' | 'submission-success' | 'submission-failed'>('loading');
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [timeElapsed, setTimeElapsed] = useState(0);
   const [volumeLevel, setVolumeLevel] = useState(0);
   const [faceWarning, setFaceWarning] = useState<string | null>(null);
   const [faceCount, setFaceCount] = useState<number>(0);
   const [cameraAtAngle, setCameraAtAngle] = useState<boolean>(false);
+  const [showConfirmLeave, setShowConfirmLeave] = useState<boolean>(false);
   
   const vapiRef = useRef<any>(null);
   const mountedRef = useRef(true);
@@ -31,6 +41,26 @@ export const InterviewRoom: React.FC<{ user: Profile, onComplete: () => void }> 
   const mobileTimerRef = useRef(0);
   const suspiciousTimerRef = useRef(0);
   const isTerminatingRef = useRef(false);
+  const connectionTimeoutRef = useRef<any>(null);
+  const transcriptTurnsRef = useRef<{ role: 'assistant' | 'user'; text: string }[]>([]);
+  const retrySaveRef = useRef<(() => Promise<void>) | null>(null);
+
+  // Intercept Browser Back Button during active interview
+  useEffect(() => {
+    if (status === 'connecting' || status === 'live') {
+      window.history.pushState(null, '', window.location.href);
+      
+      const handlePopState = () => {
+        window.history.pushState(null, '', window.location.href);
+        setShowConfirmLeave(true);
+      };
+
+      window.addEventListener('popstate', handlePopState);
+      return () => {
+        window.removeEventListener('popstate', handlePopState);
+      };
+    }
+  }, [status]);
 
   // Initialize Session
   useEffect(() => {
@@ -52,7 +82,7 @@ export const InterviewRoom: React.FC<{ user: Profile, onComplete: () => void }> 
         const i = allInterviews.find(x => x.id === active.interviewId);
         
         if (!i) {
-            alert("Critical Error: Assessment data missing.");
+            safeAlert("Critical Error: Assessment data missing.");
             onComplete();
             return;
         }
@@ -62,13 +92,36 @@ export const InterviewRoom: React.FC<{ user: Profile, onComplete: () => void }> 
 
         // Setup Vapi
         const publicKey = '08163664-575c-457e-814a-bafae9bc0eda'; 
-        const vapi = new Vapi(publicKey); 
+        let VapiClass: any = VapiDefault;
+        if (VapiClass && typeof VapiClass === 'object' && 'default' in VapiClass) {
+            VapiClass = VapiClass.default;
+        }
+        if (!VapiClass) {
+            throw new Error("Vapi library could not be loaded or default export resolved.");
+        }
+        const vapi = new VapiClass(publicKey); 
         vapiRef.current = vapi;
 
         // Vapi Event Listeners
         vapi.on('call-start', () => {
             console.log('Call has started');
+            if (connectionTimeoutRef.current) {
+                clearTimeout(connectionTimeoutRef.current);
+                connectionTimeoutRef.current = null;
+            }
             if (mountedRef.current) setStatus('live');
+        });
+
+        vapi.on('call-start-failed', (e: any) => {
+            console.error('Call start failed event:', e);
+            if (connectionTimeoutRef.current) {
+                clearTimeout(connectionTimeoutRef.current);
+                connectionTimeoutRef.current = null;
+            }
+            if (mountedRef.current) {
+                safeAlert("Failed to connect to AI server. Please try again.");
+                setStatus('instructions');
+            }
         });
 
         vapi.on('call-end', () => {
@@ -95,36 +148,44 @@ export const InterviewRoom: React.FC<{ user: Profile, onComplete: () => void }> 
         // Vapi Message event handler for transcript monitoring (to detect automatic end of questions)
         vapi.on('message', (message: any) => {
             console.log('Vapi Message received:', message);
-            if (message?.type === 'transcript' && message?.role === 'assistant' && message?.transcriptType === 'final') {
-                const text = (message.transcript || "").toLowerCase();
-                
-                // Indicators that the agent has finished all questions and is wrapping up
-                const isClosingMessage = 
-                    text.includes("concludes our interview") || 
-                    text.includes("conclude our interview") || 
-                    text.includes("concludes the interview") || 
-                    text.includes("interview is complete") || 
-                    text.includes("responses have been recorded") ||
-                    text.includes("best of luck") ||
-                    text.includes("have a great day") ||
-                    text.includes("thank you for your time");
+            if (message?.type === 'transcript' && message?.transcriptType === 'final') {
+                const text = message.transcript || "";
+                const role = message.role; // 'assistant' or 'user'
+                if (text && (role === 'assistant' || role === 'user')) {
+                    transcriptTurnsRef.current.push({ role, text });
+                    console.log(`[Transcript Turn Added] ${role}: ${text}`);
+                }
 
-                if (isClosingMessage) {
-                    console.log("Assistant spoke closing phrase. Setting auto-finish timer.");
-                    // Give 6 seconds to complete the spoken sentence naturally
-                    setTimeout(() => {
-                        if (mountedRef.current) {
-                            console.log("Auto-finishing interview room.");
-                            finishSession('completed');
-                        }
-                    }, 6000);
+                if (role === 'assistant') {
+                    const textLower = text.toLowerCase();
+                    // Indicators that the agent has finished all questions and is wrapping up
+                    const isClosingMessage = 
+                        textLower.includes("concludes our interview") || 
+                        textLower.includes("conclude our interview") || 
+                        textLower.includes("concludes the interview") || 
+                        textLower.includes("interview is complete") || 
+                        textLower.includes("responses have been recorded") ||
+                        textLower.includes("best of luck") ||
+                        textLower.includes("have a great day") ||
+                        textLower.includes("thank you for your time");
+
+                    if (isClosingMessage) {
+                        console.log("Assistant spoke closing phrase. Setting auto-finish timer.");
+                        // Give 6 seconds to complete the spoken sentence naturally
+                        setTimeout(() => {
+                            if (mountedRef.current) {
+                                console.log("Auto-finishing interview room.");
+                                finishSession('completed');
+                            }
+                        }, 6000);
+                    }
                 }
             }
         });
 
       } catch (err) {
           console.error("Init Error:", err);
-          alert("Failed to initialize system.");
+          safeAlert("Failed to initialize system.");
           onComplete();
       }
     };
@@ -133,6 +194,9 @@ export const InterviewRoom: React.FC<{ user: Profile, onComplete: () => void }> 
 
     return () => { 
         mountedRef.current = false;
+        if (connectionTimeoutRef.current) {
+            clearTimeout(connectionTimeoutRef.current);
+        }
         if (vapiRef.current) {
             try {
                 vapiRef.current.stop();
@@ -453,18 +517,67 @@ export const InterviewRoom: React.FC<{ user: Profile, onComplete: () => void }> 
         } catch (e) {}
     }
 
-    alert(`⚠️ INTERVIEW TERMINATED\nReason: ${reason}`);
+    safeAlert(`⚠️ INTERVIEW TERMINATED\nReason: ${reason}`);
     onComplete();
   };
 
-  const finishSession = async (finalStatus: 'completed') => {
+  const processTurnsToResponses = (sessionId: string, turns: { role: 'assistant' | 'user', text: string }[]): InterviewResponse[] => {
+    const responses: InterviewResponse[] = [];
+    let currentQuestion = "";
+    let currentAnswer = "";
+
+    for (const turn of turns) {
+      if (turn.role === 'assistant') {
+        if (currentAnswer) {
+          responses.push({
+            id: Math.random().toString(36).substr(2, 9),
+            sessionId,
+            questionId: `q-${responses.length}`,
+            questionText: currentQuestion.trim(),
+            responseText: currentAnswer.trim(),
+            timestamp: Date.now()
+          });
+          currentQuestion = "";
+          currentAnswer = "";
+        }
+        currentQuestion += (currentQuestion ? " " : "") + turn.text;
+      } else if (turn.role === 'user') {
+        if (currentQuestion) {
+          currentAnswer += (currentAnswer ? " " : "") + turn.text;
+        }
+      }
+    }
+
+    if (currentQuestion && currentAnswer) {
+      responses.push({
+        id: Math.random().toString(36).substr(2, 9),
+        sessionId,
+        questionId: `q-${responses.length}`,
+        questionText: currentQuestion.trim(),
+        responseText: currentAnswer.trim(),
+        timestamp: Date.now()
+      });
+    }
+
+    return responses;
+  };
+
+  const finishSession = async (finalStatus: 'completed' | 'terminated_early', overrideReason?: string) => {
     if (isTerminatingRef.current) return;
     isTerminatingRef.current = true;
     
-    if (status === 'terminated' || !session) return;
-    
-    // UI Feedback immediately
-    setStatus('completed');
+    // Clear any active connection timeout
+    if (connectionTimeoutRef.current) {
+        clearTimeout(connectionTimeoutRef.current);
+        connectionTimeoutRef.current = null;
+    }
+
+    // Stop Vapi
+    try {
+        if (vapiRef.current) vapiRef.current.stop();
+    } catch (e) {
+        console.warn("Failed to stop Vapi:", e);
+    }
 
     // Immediately stop camera tracks so the webcam light turns off
     if (streamRef.current) {
@@ -477,24 +590,57 @@ export const InterviewRoom: React.FC<{ user: Profile, onComplete: () => void }> 
         videoRef.current.srcObject = null;
     }
 
-    try {
-        if (vapiRef.current) vapiRef.current.stop();
-    } catch(e) {}
-
-    db.sessions.update({ 
-        ...session, 
-        status: finalStatus, 
-        completedAt: Date.now() 
-    }).catch(dbErr => {
-        console.error("Database error updating completed session:", dbErr);
-    });
-
+    // Exit Fullscreen if active
     if (document.fullscreenElement) {
         try {
             document.exitFullscreen().catch(() => {});
         } catch (e) {}
     }
-    onComplete();
+
+    if (status === 'terminated' || !session) return;
+    
+    // Transition to 'saving' status immediately to show saving overlay
+    setStatus('saving');
+    setSaveError(null);
+
+    // Prepare response data
+    const turns = transcriptTurnsRef.current;
+    const processedResponses = processTurnsToResponses(session.id, turns);
+
+    // Async save function that supports retry
+    const saveDataWithRetry = async () => {
+        try {
+            // 1. Save all processed responses to Supabase
+            for (const resp of processedResponses) {
+                await db.responses.save(resp);
+            }
+
+            // 2. Update session record
+            await db.sessions.update({
+                ...session,
+                status: finalStatus,
+                completedAt: Date.now(),
+                terminationReason: overrideReason || session.terminationReason
+            });
+
+            // 3. Complete successfully
+            if (mountedRef.current) {
+                setStatus('submission-success');
+            }
+        } catch (err) {
+            console.error("Database save failed during finishSession:", err);
+            if (mountedRef.current) {
+                setSaveError(err instanceof Error ? err.message : String(err));
+                setStatus('submission-failed');
+            }
+        }
+    };
+
+    // Store saveDataWithRetry ref so the UI "Retry" button can call it!
+    retrySaveRef.current = saveDataWithRetry;
+
+    // Run first attempt
+    await saveDataWithRetry();
   };
 
   const startCall = async () => {
@@ -502,6 +648,33 @@ export const InterviewRoom: React.FC<{ user: Profile, onComplete: () => void }> 
     
     await enterFullScreen();
     setStatus('connecting');
+
+    // Clear any previous connection timeout
+    if (connectionTimeoutRef.current) clearTimeout(connectionTimeoutRef.current);
+    
+    // Start connection timeout (20s) to prevent infinite loading screen
+    connectionTimeoutRef.current = setTimeout(() => {
+        if (mountedRef.current && vapiRef.current) {
+            console.warn("Vapi connection timed out.");
+            try {
+                vapiRef.current.stop();
+            } catch (e) {}
+            
+            // Clean up camera stream
+            if (streamRef.current) {
+                try {
+                    streamRef.current.getTracks().forEach(track => track.stop());
+                    streamRef.current = null;
+                } catch (e) {}
+            }
+            if (videoRef.current) {
+                videoRef.current.srcObject = null;
+            }
+            
+            safeAlert("Connection Timed Out: Failed to establish secure connection with AI Interviewer. Please verify your internet connection and try again.");
+            setStatus('instructions');
+        }
+    }, 20000);
 
     // Start Video for Detection
     try {
@@ -519,7 +692,7 @@ export const InterviewRoom: React.FC<{ user: Profile, onComplete: () => void }> 
         }
     } catch(e) {
         console.warn("Camera init failed", e);
-        alert("Camera access is required for security verification.");
+        safeAlert("Camera access is required for security verification.");
         setStatus('instructions');
         return;
     }
@@ -771,6 +944,12 @@ All candidate responses are automatically recorded. Ensure you clearly distingui
       {status === 'instructions' && (
         <div className="flex flex-col items-center justify-center h-full p-6 relative z-20 font-sans">
             <div className="absolute top-0 w-full h-1/2 bg-gradient-to-b from-[#0D9488]/10 to-transparent pointer-events-none"></div>
+            
+            {/* Elegant instructions Back Button */}
+            <div className="absolute top-6 left-6 z-30">
+               <BackButton onClick={onBack} label="Back to Dashboard" />
+            </div>
+
             <div className="max-w-md w-full text-center space-y-6 bg-[#0E1524]/80 backdrop-blur-xl p-8 rounded-[28px] border border-white/5 animate-in zoom-in-95 duration-500 mx-4 shadow-[0_20px_50px_rgba(0,0,0,0.5)]">
               
               <div className="w-14 h-14 bg-[#0D9488]/10 rounded-2xl flex items-center justify-center border border-[#0D9488]/20 mx-auto shadow-inner">
@@ -847,6 +1026,8 @@ All candidate responses are automatically recorded. Ensure you clearly distingui
           {/* FUTURISTIC TOP HEADER */}
           <header className="h-20 w-full bg-gradient-to-b from-[#070A13] to-transparent flex items-center justify-between px-8 relative z-20">
              <div className="flex items-center gap-3">
+                <BackButton onClick={() => setShowConfirmLeave(true)} label="Exit Session" />
+                <div className="w-[1px] h-4 bg-white/10 mx-1"></div>
                 <div className="w-3 h-3 rounded-full bg-[#0D9488] animate-pulse shadow-[0_0_10px_#0D9488]"></div>
                 <div>
                    <h2 className="text-xs font-bold text-white/90 tracking-widest uppercase">Secure Portal • Live Session</h2>
@@ -983,6 +1164,130 @@ All candidate responses are automatically recorded. Ensure you clearly distingui
                  <div className="w-3.5 h-3.5 bg-white rounded-sm shadow-md animate-pulse"></div>
                  <span className="tracking-widest text-xs font-black uppercase">END INTERVIEW</span>
               </Button>
+          </div>
+        </div>
+      )}
+
+      {showConfirmLeave && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-50 p-4 font-sans">
+          <div className="bg-[#0E1524] border border-white/10 rounded-[28px] max-w-sm w-full p-6 space-y-6 text-center animate-in zoom-in-95 duration-200">
+            <div className="w-12 h-12 rounded-full bg-red-500/10 text-red-500 flex items-center justify-center mx-auto border border-red-500/20">
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+            </div>
+            
+            <div className="space-y-2">
+              <h3 className="text-lg font-bold text-white">Leave Interview?</h3>
+              <p className="text-xs text-white/60 leading-relaxed">
+                Going back will end or interrupt your interview. Any unsaved progress may be lost.
+              </p>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowConfirmLeave(false)}
+                className="flex-1 py-3 px-4 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-xs font-bold text-white transition-all cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  setShowConfirmLeave(false);
+                  finishSession('completed');
+                }}
+                className="flex-1 py-3 px-4 rounded-xl bg-red-600 hover:bg-red-700 text-xs font-bold text-white shadow-[0_4px_20px_rgba(220,38,38,0.2)] transition-all cursor-pointer"
+              >
+                Leave Interview
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- DATA SAVING OVERLAY --- */}
+      {status === 'saving' && (
+        <div className="fixed inset-0 bg-[#070A13] flex flex-col items-center justify-center z-50 p-6 font-sans">
+          <div className="absolute inset-0 bg-gradient-to-tr from-[#0D9488]/5 via-transparent to-transparent pointer-events-none"></div>
+          <div className="relative mb-8">
+            <div className="w-16 h-16 border-4 border-[#0D9488]/20 border-t-[#0D9488] rounded-full animate-spin shadow-[0_0_20px_rgba(13,148,136,0.2)]"></div>
+          </div>
+          <h2 className="text-xl font-bold text-white tracking-wider uppercase mb-2">Securing Interview Session</h2>
+          <p className="text-xs text-white/50 animate-pulse">Syncing voice transcript and responses with database...</p>
+        </div>
+      )}
+
+      {/* --- SUBMISSION SUCCESS SCREEN --- */}
+      {status === 'submission-success' && (
+        <div className="fixed inset-0 bg-[#070A13] flex flex-col items-center justify-center z-50 p-6 font-sans">
+          <div className="absolute top-0 w-full h-1/2 bg-gradient-to-b from-[#0D9488]/10 to-transparent pointer-events-none"></div>
+          <div className="max-w-md w-full text-center space-y-6 bg-[#0E1524]/90 backdrop-blur-xl p-8 rounded-[28px] border border-[#0D9488]/20 shadow-[0_20px_50px_rgba(0,0,0,0.6)]">
+            <div className="w-14 h-14 bg-[#0D9488]/10 rounded-2xl flex items-center justify-center border border-[#0D9488]/20 mx-auto shadow-inner">
+              <svg className="w-6 h-6 text-[#0D9488]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+            <div className="space-y-2">
+              <h2 className="text-xl font-bold tracking-tight text-white">Interview Complete!</h2>
+              <p className="text-sm text-white/60 leading-relaxed">
+                Thank you for completing your assessment for the <span className="text-[#0D9488] font-bold">{interview?.jobRole}</span> role.
+              </p>
+              <p className="text-xs text-white/40 leading-relaxed">
+                Your responses have been securely stored. The hiring team has been notified and will review your evaluation profile shortly.
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                onComplete();
+              }}
+              className="w-full py-3 px-4 rounded-xl bg-[#0D9488] hover:bg-[#0F766E] text-xs font-bold text-white shadow-[0_4px_20px_rgba(13,148,136,0.2)] transition-all cursor-pointer uppercase tracking-wider"
+            >
+              Return to Dashboard
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* --- SUBMISSION FAILED / RETRY SCREEN --- */}
+      {status === 'submission-failed' && (
+        <div className="fixed inset-0 bg-[#070A13] flex flex-col items-center justify-center z-50 p-6 font-sans">
+          <div className="absolute top-0 w-full h-1/2 bg-gradient-to-b from-red-500/10 to-transparent pointer-events-none"></div>
+          <div className="max-w-md w-full text-center space-y-6 bg-[#0E1524]/90 backdrop-blur-xl p-8 rounded-[28px] border border-red-500/20 shadow-[0_20px_50px_rgba(0,0,0,0.6)]">
+            <div className="w-14 h-14 bg-red-500/10 rounded-2xl flex items-center justify-center border border-red-500/20 mx-auto shadow-inner">
+              <svg className="w-6 h-6 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+            </div>
+            <div className="space-y-2">
+              <h2 className="text-xl font-bold tracking-tight text-white">Submission Failed</h2>
+              <p className="text-xs text-white/60 leading-relaxed">
+                We encountered a network or database issue while saving your interview.
+              </p>
+              {saveError && (
+                <div className="bg-red-950/40 border border-red-900/30 p-3 rounded-lg text-left mt-2">
+                  <p className="font-mono text-[9px] text-red-400 break-words">{saveError}</p>
+                </div>
+              )}
+            </div>
+            <div className="flex flex-col sm:flex-row gap-3">
+              <button
+                onClick={() => {
+                  isTerminatingRef.current = false; // Allow retrying
+                  if (retrySaveRef.current) retrySaveRef.current();
+                }}
+                className="flex-1 py-3 px-4 rounded-xl bg-[#0D9488] hover:bg-[#0F766E] text-xs font-bold text-white shadow-[0_4px_20px_rgba(13,148,136,0.2)] transition-all cursor-pointer"
+              >
+                Retry Submission
+              </button>
+              <button
+                onClick={() => {
+                  onComplete();
+                }}
+                className="flex-1 py-3 px-4 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-xs font-bold text-white/60 transition-all cursor-pointer"
+              >
+                Exit Anyway
+              </button>
+            </div>
           </div>
         </div>
       )}

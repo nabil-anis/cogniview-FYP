@@ -57,6 +57,20 @@ export const Card: React.FC<{ children: React.ReactNode, className?: string, noP
   </div>
 );
 
+export const BackButton: React.FC<{ onClick: () => void, label?: string, className?: string }> = ({ onClick, label = "Back", className = "" }) => {
+  return (
+    <button
+      onClick={onClick}
+      className={`group flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/5 border border-white/10 hover:bg-white/10 text-xs font-bold text-white/80 transition-all active:scale-95 duration-200 cursor-pointer ${className}`}
+    >
+      <svg className="w-3.5 h-3.5 text-white/60 group-hover:text-white transition-transform group-hover:-translate-x-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" />
+      </svg>
+      <span>{label}</span>
+    </button>
+  );
+};
+
 export const Input: React.FC<React.InputHTMLAttributes<HTMLInputElement> & { label?: string, subLabel?: string }> = ({ label, subLabel, ...props }) => (
   <div className="w-full space-y-2">
     {(label || subLabel) && (

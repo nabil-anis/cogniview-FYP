@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { Button, Input, Card } from '../../components/Shared';
+import { Button, Input, Card, BackButton } from '../../components/Shared';
 import { db } from '../../services/db';
 import { aiService } from '../../services/gemini';
 import { Question, EvaluationParameter, Profile } from '../../types';
@@ -81,6 +81,17 @@ export const CreateInterview: React.FC<{ user: Profile, onBack: () => void }> = 
     }
   };
 
+  const handleBack = () => {
+    const hasDraft = title || jobRole || questions.length > 0 || parameters.length > 0;
+    if (hasDraft) {
+      if (confirm("Leave Assessment Setup? You will lose any unsaved changes.")) {
+        onBack();
+      }
+    } else {
+      onBack();
+    }
+  };
+
   return (
     <div className="min-h-screen bg-black text-gray-200 pb-20 pt-8 px-4 md:px-6">
       <div className="max-w-3xl mx-auto">
@@ -88,10 +99,7 @@ export const CreateInterview: React.FC<{ user: Profile, onBack: () => void }> = 
         {/* Header */}
         <div className="flex items-center justify-between mb-6 sticky top-4 z-40 bg-black/80 backdrop-blur-xl p-3 -mx-3 rounded-[16px] border border-white/5">
            <div className="flex items-center gap-3">
-              <button onClick={onBack} className="px-3 py-1.5 rounded-full bg-[#1C1C1E] flex items-center justify-center text-xs font-medium text-white/80 hover:text-white hover:bg-[#2C2C2E] transition-all border border-white/5 gap-1.5 group">
-                 <svg className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
-                 Back
-              </button>
+              <BackButton onClick={handleBack} />
               <h1 className="text-base font-semibold text-white">New Assessment</h1>
            </div>
            <Button onClick={handleSave} loading={saving} variant="primary" size="sm">
