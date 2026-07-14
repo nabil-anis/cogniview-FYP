@@ -50,13 +50,11 @@ export const Auth: React.FC<AuthProps> = ({ onAuth, onBack, initialRole = 'recru
           return;
         }
 
-        // Use Supabase auth to send OTP
-        const { error } = await supabase.auth.signInWithOtp({
-          email: resetEmail.trim(),
-        });
+        // Use Supabase auth to send OTP for password recovery
+        const { error } = await supabase.auth.resetPasswordForEmail(resetEmail.trim());
         
         if (error) {
-          setError("Failed to send recovery code. Please try again.");
+          setError("Failed to send recovery code. Please check the email and try again.");
           setLoading(false);
           return;
         }
@@ -66,7 +64,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuth, onBack, initialRole = 'recru
         const { error } = await supabase.auth.verifyOtp({
           email: resetEmail.trim(),
           token: inputCode,
-          type: 'email'
+          type: 'recovery'
         });
 
         if (error) {
@@ -81,8 +79,20 @@ export const Auth: React.FC<AuthProps> = ({ onAuth, onBack, initialRole = 'recru
           return;
         }
 
+        const { error: updateError } = await supabase.auth.updateUser({
+          password: newPassword
+        });
+
+        if (updateError) {
+          setError("Failed to update password. Please try again.");
+          setLoading(false);
+          return;
+        }
+
         // Password reset is successful
         setSuccessMessage("Your password has been securely updated. You can now log in.");
+        // Sign out so they can log in with the new password
+        await supabase.auth.signOut();
       }
     } catch (err) {
       console.error(err);

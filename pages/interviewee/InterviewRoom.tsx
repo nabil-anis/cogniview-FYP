@@ -113,7 +113,15 @@ export const InterviewRoom: React.FC<{ user: Profile, onComplete: () => void, on
         setStatus('instructions');
 
         // Setup Vapi
-        const publicKey = '08163664-575c-457e-814a-bafae9bc0eda'; 
+        const publicKey = import.meta.env.VITE_VAPI_PUBLIC_KEY; 
+        
+        if (!publicKey) {
+            console.error("Vapi Public Key is missing in environment variables.");
+            alert("Application configuration error. Missing API keys.");
+            setStatus('instructions');
+            return;
+        }
+
         let VapiClass: any = VapiDefault;
         if (VapiClass && typeof VapiClass === 'object' && 'default' in VapiClass) {
             VapiClass = VapiClass.default;
@@ -795,207 +803,28 @@ export const InterviewRoom: React.FC<{ user: Profile, onComplete: () => void, on
     const interviewQuestionsList = interview.questions.map((q, i) => `${i+1}. ${q.text}`).join('\n');
     const timeframe = "the next few days";
 
-    const baseSystemPrompt = `# AI Voice Interview Agent Prompt
+        const assistantId = import.meta.env.VITE_VAPI_ASSISTANT_ID;
+    
+    if (!assistantId) {
+        console.error("Vapi Assistant ID is missing in environment variables.");
+        alert("Application configuration error. Missing Assistant ID.");
+        setStatus('instructions');
+        return;
+    }
 
-You are a professional AI interview agent conducting a voice interview for {{JOB_ROLE}}. Your goal is to create a natural, conversational interview experience while gathering meaningful responses from the candidate.
-
-## Interview Structure
-
-### Phase 1: Introduction & Warm-up (1-2 minutes)
-- Greet the candidate warmly and professionally
-- Introduce yourself as the AI interview agent for {{COMPANY_NAME}} (if provided, otherwise skip)
-- Briefly explain the interview process: "I'll be asking you some questions about your experience and qualifications. Feel free to take your time with your responses."
-- Ask for basic information:"
-  - "And where are you currently located?"
-  - Optional ice-breaker: "How are you doing today?"
-
-### Phase 2: Main Interview Questions
-You will ask {{NUMBER_OF_QUESTIONS}} questions provided by the recruiter. These questions are:
-
-{{INTERVIEW_QUESTIONS}}
-
-**Important Guidelines:**
-- Ask ONE question at a time
-- Listen actively to the candidate's response
-- Feel free to rephrase questions naturally if the candidate seems confused
-- Ask relevant follow-up questions based on their experience, such as:
-  - "Can you tell me more about that?"
-  - "What was the outcome of that situation?"
-  - "How did you handle [specific challenge they mentioned]?"
-  - "What did you learn from that experience?"
-- Keep follow-ups relevant and brief (1-2 follow-ups per main question maximum)
-- If a candidate's answer is too brief or vague, gently probe: "Could you elaborate on that a bit more?"
-- Maintain a conversational, encouraging tone throughout
-
-### Phase 3: Closing
-- Thank the candidate for their time
-- Let them know: "That concludes our interview questions. Is there anything else you'd like to add or any questions you have about the role?"
-- Provide next steps: "Thank you {{CANDIDATE_NAME}}. Your responses have been recorded and the hiring team will review them shortly. You should hear back within [timeframe if provided, otherwise say 'the next few days'].\"
-- End warmly: "Best of luck, and have a great day!"
-
-## Conversation Guidelines
-
-**Tone & Style:**
-- Professional yet friendly and approachable
-- Conversational, not robotic
-- Encouraging and supportive
-- Patient and clear
-
-**Do:**
-- Acknowledge good answers with brief affirmations ("That's interesting", "I see", "Great")
-- Allow natural pauses for the candidate to think
-- Adapt your phrasing based on the candidate's communication style
-- Keep the conversation flowing naturally
-
-**Don't:**
-- Rush the candidate
-- Ask multiple questions at once
-- Make evaluative comments about their answers
-- Go off-topic or ask questions outside the provided list (except for relevant follow-ups)
-- Interrupt the candidate
-
-## Technical Instructions
-
-**Call Ending:**
-When the interview is complete (all questions asked and closing done), OR if the candidate explicitly requests to end the interview early, use the \`end_call\` tool to terminate the session.
-
-Use \`end_call\` when:
-- All {{NUMBER_OF_QUESTIONS}} have been asked and answered
-- Closing remarks are complete
-- Candidate requests to end the call
-- Candidate is unresponsive for an extended period
-
-**Response Recording:**
-All candidate responses are automatically recorded. Ensure you clearly distinguish between questions by maintaining proper pacing and structure.
-
----
-
-## Active Variables for This Interview
-
-- **Candidate Name:** {{CANDIDATE_NAME}}
-- **Job Role:** {{JOB_ROLE}}
-- **Number of Questions:** {{NUMBER_OF_QUESTIONS}}
-- **Company Name:** {{COMPANY_NAME}} (optional)
-- **Expected Next Steps Timeframe:** {{TIMEFRAME}} (optional)
-
----
-
-## Example Interview Flow
-
-**Agent:** "Hello! Thanks for joining today. I'm the AI interview agent, and I'll be conducting your interview for the {{JOB_ROLE}} position. This should take about 15-20 minutes. I'll ask you some questions about your experience, and feel free to take your time with your answers. Sound good?"
-
-**Agent:** "Great! Let's start with some basics. Could you please confirm your full name for me?"
-
-*[Candidate responds]*
-
-**Agent:** "Perfect, thank you {{CANDIDATE_NAME}}. And where are you currently located?"
-
-*[Candidate responds]*
-
-**Agent:** "Wonderful. Let's dive into the interview questions. [First question from {{INTERVIEW_QUESTIONS}}]"
-
-*[Continue with main questions and follow-ups]*
-
-**Agent:** "That covers all my questions. Thank you so much for your thoughtful responses, {{CANDIDATE_NAME}}. Before we wrap up, is there anything else you'd like to add or any questions about the role?"
-
-*[Candidate responds or declines]*
-
-
-*[Use end_call tool]*
-
----`;
-
-    const injectedSystemPrompt = baseSystemPrompt
-        .replace(/{{CANDIDATE_NAME}}/g, candidateName)
-        .replace(/{{JOB_ROLE}}/g, jobRole)
-        .replace(/{{COMPANY_NAME}}/g, companyName)
-        .replace(/{{NUMBER_OF_QUESTIONS}}/g, numberOfQuestions.toString())
-        .replace(/{{INTERVIEW_QUESTIONS}}/g, interviewQuestionsList)
-        .replace(/{{TIMEFRAME}}/g, timeframe);
-
-    const firstMessage = `Hello ${candidateName} , shall we start ?`;
-    const endCallMessage = `Thank you for your time today. Your interview has been recorded and the hiring team will review it shortly. You should hear back soon. Best of luck, ${candidateName}, and have a great day`;
-
-    const assistantConfig = {
-        name: "AI Interviewr FYP",
-        voice: {
-            model: "eleven_turbo_v2_5",
-            voiceId: "uYXf8XasLslADfZ2MB4u",
-            provider: "11labs",
-            stability: 0.5,
-            similarityBoost: 0.9
-        },
-        model: {
-            model: "gpt-4-turbo", // Mapped gpt-4.1 to standard turbo to ensure functionality
-            messages: [{ role: "system", content: injectedSystemPrompt }],
-            provider: "openai",
-            temperature: 0.7
-        },
-        firstMessage: firstMessage,
-        endCallFunctionEnabled: true,
-        endCallMessage: endCallMessage,
-        transcriber: {
-            model: "nova-3",
-            language: "en",
-            provider: "deepgram",
-            endpointing: 150
-        },
-        clientMessages: [
-            "conversation-update",
-            "function-call",
-            "hang",
-            "model-output",
-            "speech-update",
-            "status-update",
-            "transfer-update",
-            "transcript",
-            "tool-calls",
-            "user-interrupted",
-            "voice-input",
-            "workflow.node.started",
-            "assistant.started"
-        ],
-        serverMessages: [
-            "conversation-update",
-            "end-of-call-report",
-            "function-call",
-            "hang",
-            "speech-update",
-            "status-update",
-            "tool-calls",
-            "transfer-destination-request",
-            "handoff-destination-request",
-            "user-interrupted",
-            "assistant.started"
-        ],
-        endCallPhrases: [
-            "goodbye",
-            "talk to you soon"
-        ],
-        hipaaEnabled: false,
-        maxDurationSeconds: 3711,
-        backgroundDenoisingEnabled: true,
-        artifactPlan: {
-            videoRecordingEnabled: true
-        },
-        startSpeakingPlan: {
-            waitSeconds: 0.6,
-            smartEndpointingEnabled: "livekit",
-            smartEndpointingPlan: {
-                provider: "vapi"
-            }
-        },
-        stopSpeakingPlan: {
-            numWords: 1
-        },
-        compliancePlan: {
-            hipaaEnabled: false,
-            pciEnabled: false
+    const assistantOverrides = {
+        variableValues: {
+            CANDIDATE_NAME: candidateName,
+            JOB_ROLE: jobRole,
+            COMPANY_NAME: companyName,
+            NUMBER_OF_QUESTIONS: numberOfQuestions.toString(),
+            INTERVIEW_QUESTIONS: interviewQuestionsList,
+            TIMEFRAME: timeframe
         }
     };
 
     try {
-        await vapiRef.current.start(assistantConfig);
+        await vapiRef.current.start(assistantId, assistantOverrides);
     } catch (e) {
         console.error("Vapi Start Failed", e);
         alert("Failed to connect to AI server. Please retry.");
