@@ -25,7 +25,7 @@ const App: React.FC = () => {
     };
     init();
 
-    // Intercept and demote Vapi/LiveKit ejection and meeting end errors
+    // Intercept and demote Vapi/LiveKit/WebRTC transient errors
     const originalConsoleError = console.error;
     console.error = (...args: any[]) => {
       const msg = args.map(arg => {
@@ -40,8 +40,21 @@ const App: React.FC = () => {
         return String(arg);
       }).join(' ');
 
-      if (msg.includes("ejection") || msg.includes("Meeting has ended") || msg.includes("Room closed") || msg.includes("Meeting ended due to ejection")) {
-        console.warn("[Demoted Error to Warn] Vapi connection finished:", ...args);
+      const isIgnorableError = 
+        msg.includes("ejection") || 
+        msg.includes("Meeting has ended") || 
+        msg.includes("Room closed") || 
+        msg.includes("Meeting ended due to ejection") ||
+        msg.includes("krisp") ||
+        msg.includes("WASM_OR_WORKER_NOT_READY") ||
+        msg.includes("Switch to soup failed") ||
+        msg.includes("cloud recording") ||
+        msg.includes("forced switch to sfu") ||
+        msg.includes("audio level observer") ||
+        msg.includes("audio_level_observer");
+
+      if (isIgnorableError) {
+        console.warn("[Demoted Error to Warn] Transient WebRTC/Vapi connection warning:", ...args);
         return;
       }
       originalConsoleError.apply(console, args);
@@ -49,7 +62,20 @@ const App: React.FC = () => {
 
     const handleWindowError = (event: ErrorEvent) => {
       const msg = event?.message || "";
-      if (msg.includes("ejection") || msg.includes("Meeting has ended") || msg.includes("Room closed") || msg.includes("Meeting ended due to ejection")) {
+      const isIgnorableError = 
+        msg.includes("ejection") || 
+        msg.includes("Meeting has ended") || 
+        msg.includes("Room closed") || 
+        msg.includes("Meeting ended due to ejection") ||
+        msg.includes("krisp") ||
+        msg.includes("WASM_OR_WORKER_NOT_READY") ||
+        msg.includes("Switch to soup failed") ||
+        msg.includes("cloud recording") ||
+        msg.includes("forced switch to sfu") ||
+        msg.includes("audio level observer") ||
+        msg.includes("audio_level_observer");
+
+      if (isIgnorableError) {
         event.preventDefault();
         console.log("[Silenced Unhandled Error]:", msg);
       }
@@ -57,7 +83,20 @@ const App: React.FC = () => {
 
     const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
       const msg = event?.reason?.message || String(event?.reason || "");
-      if (msg.includes("ejection") || msg.includes("Meeting has ended") || msg.includes("Room closed") || msg.includes("Meeting ended due to ejection")) {
+      const isIgnorableError = 
+        msg.includes("ejection") || 
+        msg.includes("Meeting has ended") || 
+        msg.includes("Room closed") || 
+        msg.includes("Meeting ended due to ejection") ||
+        msg.includes("krisp") ||
+        msg.includes("WASM_OR_WORKER_NOT_READY") ||
+        msg.includes("Switch to soup failed") ||
+        msg.includes("cloud recording") ||
+        msg.includes("forced switch to sfu") ||
+        msg.includes("audio level observer") ||
+        msg.includes("audio_level_observer");
+
+      if (isIgnorableError) {
         event.preventDefault();
         console.log("[Silenced Unhandled Rejection]:", msg);
       }

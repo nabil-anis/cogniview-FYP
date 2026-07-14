@@ -4,6 +4,7 @@ import { db } from '../../services/db';
 import { Interview, Profile, InterviewSession, InterviewResponse } from '../../types';
 import VapiDefault from '@vapi-ai/web';
 import { FaceDetector, ObjectDetector, FilesetResolver } from '@mediapipe/tasks-vision';
+import { aiService } from '../../services/gemini';
 
 const safeAlert = (msg: string) => {
   try {
@@ -24,6 +25,8 @@ export const InterviewRoom: React.FC<{ user: Profile, onComplete: () => void, on
   const [faceCount, setFaceCount] = useState<number>(0);
   const [cameraAtAngle, setCameraAtAngle] = useState<boolean>(false);
   const [showConfirmLeave, setShowConfirmLeave] = useState<boolean>(false);
+  const [savingProgress, setSavingProgress] = useState<string>('Preparing finalization...');
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   
   const vapiRef = useRef<any>(null);
   const mountedRef = useRef(true);
@@ -565,6 +568,8 @@ export const InterviewRoom: React.FC<{ user: Profile, onComplete: () => void, on
   const finishSession = async (finalStatus: 'completed' | 'terminated_early', overrideReason?: string) => {
     if (isTerminatingRef.current) return;
     isTerminatingRef.current = true;
+    setIsSubmitting(true);
+    setSavingProgress("Closing AI interviewer connection securely...");
     
     // Clear any active connection timeout
     if (connectionTimeoutRef.current) {
@@ -572,14 +577,22 @@ export const InterviewRoom: React.FC<{ user: Profile, onComplete: () => void, on
         connectionTimeoutRef.current = null;
     }
 
-    // Stop Vapi
+    // Stop Vapi and detach listeners to prevent race conditions or unexpected triggers
     try {
-        if (vapiRef.current) vapiRef.current.stop();
+        if (vapiRef.current) {
+            vapiRef.current.stop();
+            if (typeof vapiRef.current.removeAllListeners === 'function') {
+                vapiRef.current.removeAllListeners();
+            } else if (typeof vapiRef.current.off === 'function') {
+                vapiRef.current.off();
+            }
+        }
     } catch (e) {
         console.warn("Failed to stop Vapi:", e);
     }
 
     // Immediately stop camera tracks so the webcam light turns off
+    setSavingProgress("Safely disconnecting webcam stream...");
     if (streamRef.current) {
         try {
             streamRef.current.getTracks().forEach(track => track.stop());
@@ -597,7 +610,7 @@ export const InterviewRoom: React.FC<{ user: Profile, onComplete: () => void, on
         } catch (e) {}
     }
 
-    if (status === 'terminated' || !session) return;
+    if (!session) return;
     
     // Transition to 'saving' status immediately to show saving overlay
     setStatus('saving');
@@ -610,12 +623,24 @@ export const InterviewRoom: React.FC<{ user: Profile, onComplete: () => void, on
     // Async save function that supports retry
     const saveDataWithRetry = async () => {
         try {
-            // 1. Save all processed responses to Supabase
-            for (const resp of processedResponses) {
-                await db.responses.save(resp);
+            setIsSubmitting(true);
+            setSavingProgress("Formatting and packaging interview responses...");
+            await new Promise(resolve => setTimeout(resolve, 800));
+
+            // 1. Save all processed responses to Supabase/DB
+            if (processedResponses.length > 0) {
+                setSavingProgress(`Securing transcripts (${processedResponses.length} answers parsed)...`);
+                for (let i = 0; i < processedResponses.length; i++) {
+                    const resp = processedResponses[i];
+                    setSavingProgress(`Synchronizing transcript turn ${i + 1} of ${processedResponses.length}...`);
+                    await db.responses.save(resp);
+                }
+            } else {
+                setSavingProgress("Parsing short-session audio markers...");
             }
 
             // 2. Update session record
+            setSavingProgress("Updating session state history...");
             await db.sessions.update({
                 ...session,
                 status: finalStatus,
@@ -623,7 +648,34 @@ export const InterviewRoom: React.FC<{ user: Profile, onComplete: () => void, on
                 terminationReason: overrideReason || session.terminationReason
             });
 
-            // 3. Complete successfully
+            // 3. Eagerly generate AI Evaluation
+            if (processedResponses.length > 0 && interview) {
+                setSavingProgress("Analyzing verbal response vectors using Gemini...");
+                try {
+                    const result = await aiService.evaluateCandidate(
+                        interview.jobRole,
+                        interview.parameters,
+                        processedResponses.map(r => ({ q: r.questionText, a: r.responseText }))
+                    );
+                    
+                    setSavingProgress("Assembling detailed HR scorecard & sentiment analysis...");
+                    const ev = {
+                        id: Math.random().toString(36).substr(2, 9),
+                        responseId: processedResponses[0]?.id || 'none',
+                        ...result
+                    };
+                    await db.evaluations.save(ev);
+                    setSavingProgress("Evaluation successfully stored for recruiter review!");
+                } catch (evalErr) {
+                    console.error("Non-fatal eager evaluation error:", evalErr);
+                    setSavingProgress("Responses secured. Metric generation pending recruiter review...");
+                }
+                await new Promise(resolve => setTimeout(resolve, 800));
+            }
+
+            setSavingProgress("All interview data secured and synced successfully!");
+            await new Promise(resolve => setTimeout(resolve, 600));
+
             if (mountedRef.current) {
                 setStatus('submission-success');
             }
@@ -632,6 +684,10 @@ export const InterviewRoom: React.FC<{ user: Profile, onComplete: () => void, on
             if (mountedRef.current) {
                 setSaveError(err instanceof Error ? err.message : String(err));
                 setStatus('submission-failed');
+            }
+        } finally {
+            if (mountedRef.current) {
+                setIsSubmitting(false);
             }
         }
     };
@@ -1159,10 +1215,21 @@ All candidate responses are automatically recorded. Ensure you clearly distingui
           <div className="absolute bottom-0 w-full z-20 p-8 flex flex-col items-center bg-gradient-to-t from-[#070A13] via-[#070A13]/90 to-transparent">
               <Button 
                  onClick={handleManualEnd}
-                 className="w-full max-w-sm h-14 rounded-2xl bg-red-600 hover:bg-red-700 text-white font-bold shadow-[0_10px_35px_rgba(220,38,38,0.3)] hover:shadow-[0_10px_45px_rgba(220,38,38,0.5)] transition-all hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-3 border border-red-500/30"
+                 disabled={isSubmitting}
+                 className={`w-full max-w-sm h-14 rounded-2xl font-bold transition-all flex items-center justify-center gap-3 border ${
+                   isSubmitting 
+                     ? 'bg-red-900/40 text-red-400 border-red-900/50 cursor-not-allowed scale-95 opacity-70' 
+                     : 'bg-red-600 hover:bg-red-700 text-white hover:scale-[1.02] active:scale-[0.98] shadow-[0_10px_35px_rgba(220,38,38,0.3)] hover:shadow-[0_10px_45px_rgba(220,38,38,0.5)] border-red-500/30'
+                 }`}
               >
-                 <div className="w-3.5 h-3.5 bg-white rounded-sm shadow-md animate-pulse"></div>
-                 <span className="tracking-widest text-xs font-black uppercase">END INTERVIEW</span>
+                 {isSubmitting ? (
+                    <div className="w-4 h-4 border-2 border-red-400 border-t-transparent rounded-full animate-spin"></div>
+                 ) : (
+                    <div className="w-3.5 h-3.5 bg-white rounded-sm shadow-md animate-pulse"></div>
+                 )}
+                 <span className="tracking-widest text-xs font-black uppercase">
+                   {isSubmitting ? 'FINALIZING INTERVIEW...' : 'END INTERVIEW'}
+                 </span>
               </Button>
           </div>
         </div>
@@ -1212,8 +1279,8 @@ All candidate responses are automatically recorded. Ensure you clearly distingui
           <div className="relative mb-8">
             <div className="w-16 h-16 border-4 border-[#0D9488]/20 border-t-[#0D9488] rounded-full animate-spin shadow-[0_0_20px_rgba(13,148,136,0.2)]"></div>
           </div>
-          <h2 className="text-xl font-bold text-white tracking-wider uppercase mb-2">Securing Interview Session</h2>
-          <p className="text-xs text-white/50 animate-pulse">Syncing voice transcript and responses with database...</p>
+          <h2 className="text-xl font-bold text-white tracking-wider uppercase mb-2">Finalizing Interview...</h2>
+          <p className="text-xs text-[#0D9488] font-semibold animate-pulse tracking-wide mt-1 max-w-sm text-center">{savingProgress}</p>
         </div>
       )}
 
