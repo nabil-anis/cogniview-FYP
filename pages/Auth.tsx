@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { Button, Input, Card, BackButton } from '../components/Shared';
 import { db } from '../services/db';
+import { supabase } from '../services/supabase';
 import { Profile } from '../types';
 
 interface AuthProps {
@@ -25,7 +26,6 @@ export const Auth: React.FC<AuthProps> = ({ onAuth, onBack, initialRole = 'recru
   const [isForgotPassword, setIsForgotPassword] = useState(false);
   const [forgotStep, setForgotStep] = useState<'request' | 'verify'>('request');
   const [resetEmail, setResetEmail] = useState('');
-  const [sentCode, setSentCode] = useState('');
   const [inputCode, setInputCode] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -50,12 +50,26 @@ export const Auth: React.FC<AuthProps> = ({ onAuth, onBack, initialRole = 'recru
           return;
         }
 
-        // Generate and store a secure 6-digit recovery code
-        const code = Math.floor(100000 + Math.random() * 900000).toString();
-        setSentCode(code);
+        // Use Supabase auth to send OTP
+        const { error } = await supabase.auth.signInWithOtp({
+          email: resetEmail.trim(),
+        });
+        
+        if (error) {
+          setError("Failed to send recovery code. Please try again.");
+          setLoading(false);
+          return;
+        }
+        
         setForgotStep('verify');
       } else {
-        if (inputCode !== sentCode) {
+        const { error } = await supabase.auth.verifyOtp({
+          email: resetEmail.trim(),
+          token: inputCode,
+          type: 'email'
+        });
+
+        if (error) {
           setError("Invalid security verification code. Please check and try again.");
           setLoading(false);
           return;
@@ -250,9 +264,9 @@ export const Auth: React.FC<AuthProps> = ({ onAuth, onBack, initialRole = 'recru
                 ) : (
                   <div className="space-y-4">
                     <div className="bg-[#1C1C1E] border border-white/5 p-3 rounded-2xl text-center space-y-1">
-                      <p className="text-[9px] text-white/40 uppercase tracking-widest font-bold">Secure Verification Code</p>
-                      <p className="font-mono text-lg font-bold text-[#007AFF] tracking-widest">{sentCode}</p>
-                      <p className="text-[9px] text-white/30">Use this code to authorize updates.</p>
+                      <p className="text-[9px] text-white/40 uppercase tracking-widest font-bold">Secure Verification Code Sent</p>
+                      <p className="text-[12px] font-bold text-[#007AFF] tracking-wide">Please check your email</p>
+                      <p className="text-[9px] text-white/30">Use the code sent to authorize updates.</p>
                     </div>
                     
                     <Input 

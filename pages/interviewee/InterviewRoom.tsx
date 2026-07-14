@@ -17,7 +17,13 @@ const safeAlert = (msg: string) => {
 export const InterviewRoom: React.FC<{ user: Profile, onComplete: () => void, onBack: () => void }> = ({ user, onComplete, onBack }) => {
   const [session, setSession] = useState<InterviewSession | null>(null);
   const [interview, setInterview] = useState<Interview | null>(null);
-  const [status, setStatus] = useState<'loading' | 'instructions' | 'connecting' | 'live' | 'completed' | 'terminated' | 'saving' | 'submission-success' | 'submission-failed'>('loading');
+  const [status, setStatusState] = useState<'loading' | 'instructions' | 'connecting' | 'live' | 'completed' | 'terminated' | 'saving' | 'submission-success' | 'submission-failed'>('loading');
+  const statusRef = useRef<'loading' | 'instructions' | 'connecting' | 'live' | 'completed' | 'terminated' | 'saving' | 'submission-success' | 'submission-failed'>('loading');
+
+  const setStatus = (newStatus: any) => {
+      setStatusState(newStatus);
+      statusRef.current = newStatus;
+  };
   const [saveError, setSaveError] = useState<string | null>(null);
   const [timeElapsed, setTimeElapsed] = useState(0);
   const [volumeLevel, setVolumeLevel] = useState(0);
@@ -27,6 +33,19 @@ export const InterviewRoom: React.FC<{ user: Profile, onComplete: () => void, on
   const [showConfirmLeave, setShowConfirmLeave] = useState<boolean>(false);
   const [savingProgress, setSavingProgress] = useState<string>('Preparing finalization...');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+
+  const sessionRef = useRef<InterviewSession | null>(null);
+  const interviewRef = useRef<Interview | null>(null);
+
+  const updateSession = (s: InterviewSession | null) => {
+    setSession(s);
+    sessionRef.current = s;
+  };
+
+  const updateInterview = (i: Interview | null) => {
+    setInterview(i);
+    interviewRef.current = i;
+  };
   
   const vapiRef = useRef<any>(null);
   const mountedRef = useRef(true);
@@ -79,7 +98,7 @@ export const InterviewRoom: React.FC<{ user: Profile, onComplete: () => void, on
             return;
         }
 
-        setSession(active);
+        updateSession(active);
 
         const allInterviews = await db.interviews.getAll();
         const i = allInterviews.find(x => x.id === active.interviewId);
@@ -90,7 +109,7 @@ export const InterviewRoom: React.FC<{ user: Profile, onComplete: () => void, on
             return;
         }
 
-        setInterview(i);
+        updateInterview(i);
         setStatus('instructions');
 
         // Setup Vapi
@@ -218,8 +237,19 @@ export const InterviewRoom: React.FC<{ user: Profile, onComplete: () => void, on
       if (isTerminatingRef.current) return;
       if (!mountedRef.current) return;
       
+      const currentStatus = statusRef.current;
       // If we are already terminated, don't override with 'completed'
-      if (status === 'terminated') return;
+      if (currentStatus === 'terminated' || currentStatus === 'saving' || currentStatus === 'submission-success') return;
+      
+      // If the call was never live, it shouldn't trigger a completed interview
+      if (currentStatus !== 'live') {
+          console.warn(`Call ended early with status: ${currentStatus}. Reverting to instructions.`);
+          if (currentStatus === 'connecting') {
+              safeAlert("Failed to establish secure connection with AI Interviewer. Please try again.");
+          }
+          setStatus('instructions');
+          return;
+      }
 
       finishSession('completed');
   };
@@ -610,7 +640,11 @@ export const InterviewRoom: React.FC<{ user: Profile, onComplete: () => void, on
         } catch (e) {}
     }
 
-    if (!session) return;
+    const currentSession = sessionRef.current || session;
+    if (!currentSession) {
+        console.warn("finishSession aborted: active session is null.");
+        return;
+    }
     
     // Transition to 'saving' status immediately to show saving overlay
     setStatus('saving');
@@ -618,7 +652,7 @@ export const InterviewRoom: React.FC<{ user: Profile, onComplete: () => void, on
 
     // Prepare response data
     const turns = transcriptTurnsRef.current;
-    const processedResponses = processTurnsToResponses(session.id, turns);
+    const processedResponses = processTurnsToResponses(currentSession.id, turns);
 
     // Async save function that supports retry
     const saveDataWithRetry = async () => {
@@ -642,19 +676,20 @@ export const InterviewRoom: React.FC<{ user: Profile, onComplete: () => void, on
             // 2. Update session record
             setSavingProgress("Updating session state history...");
             await db.sessions.update({
-                ...session,
+                ...currentSession,
                 status: finalStatus,
                 completedAt: Date.now(),
-                terminationReason: overrideReason || session.terminationReason
+                terminationReason: overrideReason || currentSession.terminationReason
             });
 
             // 3. Eagerly generate AI Evaluation
-            if (processedResponses.length > 0 && interview) {
+            const currentInterview = interviewRef.current || interview;
+            if (processedResponses.length > 0 && currentInterview) {
                 setSavingProgress("Analyzing verbal response vectors using Gemini...");
                 try {
                     const result = await aiService.evaluateCandidate(
-                        interview.jobRole,
-                        interview.parameters,
+                        currentInterview.jobRole,
+                        currentInterview.parameters,
                         processedResponses.map(r => ({ q: r.questionText, a: r.responseText }))
                     );
                     

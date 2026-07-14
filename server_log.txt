@@ -1,0 +1,7 @@
+
+> cogniview---intelligence-reimagined@0.0.0 dev
+> tsx server.ts
+
+◇ injected env (0) from .env // tip: ⌁ auth for agents [www.vestauth.com]
+WebSocket server error: Port 24678 is already in use
+Server running on http://localhost:3000
